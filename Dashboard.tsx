@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 // Importing the contract connection logic
-import { createCase, fundCase } from './genlayer_client';
+import { createCase, fundCase, submitDelivery } from './genlayer_client';
 
 export default function AgentCourtDashboard() {
   const [activeTab, setActiveTab] = useState<'buyer' | 'provider' | 'court'>('buyer');
@@ -66,29 +66,42 @@ export default function AgentCourtDashboard() {
             {activeTab === 'court' && 'Inspect GenLayer validator consensus, equivalence principles, and appeal logs.'}
           </p>
 
-          {/* Action Area for GenLayer Smart Contract Interactions */}
+          {/* Buyer Action Area */}
           {activeTab === 'buyer' && (
             <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', marginTop: '15px', display: 'flex', gap: '10px' }}>
               <button 
                 onClick={async () => {
-                  // Calling the communication function we created in genlayer_client.ts
                   const result = await createCase("CASE-03", '{"task": "dev"}', "0xProviderAddress...");
                   alert("Transaction status: " + result?.status);
                 }}
                 style={{ padding: '10px 20px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
-                Create New Case (On-Chain)
+                Create New Case
               </button>
 
               <button 
                 onClick={async () => {
-                  // Calling the fundCase function we created in genlayer_client.ts
                   const result = await fundCase("CASE-03", 1000);
                   alert("Escrow funded status: " + result?.status);
                 }}
                 style={{ padding: '10px 20px', background: '#059669', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Fund Escrow (1000 USDC)
+              </button>
+            </div>
+          )}
+
+          {/* Provider Action Area */}
+          {activeTab === 'provider' && (
+            <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', marginTop: '15px' }}>
+              <button 
+                onClick={async () => {
+                  const result = await submitDelivery("CASE-03", '{"github": "https://github.com/repo"}');
+                  alert("Delivery submission status: " + result?.status);
+                }}
+                style={{ padding: '10px 20px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Submit Delivery & Evidence
               </button>
             </div>
           )}
