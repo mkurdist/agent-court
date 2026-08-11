@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 // Importing the contract connection logic
-import { createCase } from './genlayer_client';
+import { createCase, fundCase } from './genlayer_client';
 
 export default function AgentCourtDashboard() {
   const [activeTab, setActiveTab] = useState<'buyer' | 'provider' | 'court'>('buyer');
@@ -68,7 +68,7 @@ export default function AgentCourtDashboard() {
 
           {/* Action Area for GenLayer Smart Contract Interactions */}
           {activeTab === 'buyer' && (
-            <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', marginTop: '15px' }}>
+            <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', marginTop: '15px', display: 'flex', gap: '10px' }}>
               <button 
                 onClick={async () => {
                   // Calling the communication function we created in genlayer_client.ts
@@ -78,6 +78,17 @@ export default function AgentCourtDashboard() {
                 style={{ padding: '10px 20px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Create New Case (On-Chain)
+              </button>
+
+              <button 
+                onClick={async () => {
+                  // Calling the fundCase function we created in genlayer_client.ts
+                  const result = await fundCase("CASE-03", 1000);
+                  alert("Escrow funded status: " + result?.status);
+                }}
+                style={{ padding: '10px 20px', background: '#059669', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Fund Escrow (1000 USDC)
               </button>
             </div>
           )}
