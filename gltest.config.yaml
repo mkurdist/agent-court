@@ -1,0 +1,17 @@
+version: "1.0"
+project:
+  name: "AgentCourt"
+  description: "Trustless Dispute Resolution & Settlement for AI Agents"
+  contracts:
+    - path: "contracts/agent_court.py"
+      name: "AgentCourt"
+
+simulation:
+  validator_count: 4
+  consensus_threshold: 0.66
+  enable_web_access: true
+  sanitize_data: true
+
+testing:
+  test_directory: "tests"
+  auto_deploy: true
