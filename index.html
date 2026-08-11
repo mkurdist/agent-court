@@ -257,6 +257,7 @@ let state = {
   caseId: DEFAULT_AGREEMENT.case_id,
   buyerAddress: "0xB7a3...4Ef1",
   providerAddress: "0xP902...aC3d",
+  caseCreated: false,
   caseState: "DRAFT",
   escrowBalance: 0,
   evidence: { githubUrl:"", apiUrl:"", notes:"" },
@@ -286,18 +287,20 @@ function pushLog(text, kind){
 /* ---------------------------- contract calls ---------------------------- */
 
 function createCase(){
-  if(state.caseState !== "DRAFT" || state.log.some(l=>l.kind==="create")){
-    // allow re-create only truly at start; guard re-entrancy visually
-  }
+  if(state.caseCreated){ pushLog("create_case() rejected: case already exists — reset to start a new one", "error"); renderAll(); return; }
+  if(!state.caseId || !state.caseId.trim()){ pushLog("create_case() rejected: case_id is required", "error"); renderAll(); return; }
+  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("create_case() rejected: provider address is required", "error"); renderAll(); return; }
   state.agreement.case_id = state.caseId;
-  pushLog(`create_case("${state.caseId}") → buyer ${state.buyerAddress} bound, provider ${state.providerAddress} bound`, "create");
+  state.caseCreated = true;
   state.caseState = "DRAFT";
+  pushLog(`create_case("${state.caseId}") → buyer ${state.buyerAddress} bound, provider ${state.providerAddress} bound`, "create");
   renderAll();
 }
 
 function fundCase(amount){
-  if(state.caseState !== "DRAFT"){ pushLog("fund_case() rejected: invalid state for funding", "error"); return; }
-  if(!amount || amount <= 0){ pushLog("fund_case() rejected: amount must be > 0", "error"); return; }
+  if(!state.caseCreated){ pushLog("fund_case() rejected: create the case first", "error"); renderAll(); return; }
+  if(state.caseState !== "DRAFT"){ pushLog("fund_case() rejected: invalid state for funding", "error"); renderAll(); return; }
+  if(!amount || isNaN(amount) || amount <= 0){ pushLog("fund_case() rejected: amount must be > 0", "error"); renderAll(); return; }
   state.escrowBalance = amount;
   state.caseState = "ACTIVE";
   pushLog(`fund_case(${amount} USDC) → escrow locked, case ACTIVE`, "success");
@@ -305,9 +308,9 @@ function fundCase(amount){
 }
 
 function submitDelivery(){
-  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() rejected: case is not ACTIVE", "error"); return; }
+  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() rejected: case is not ACTIVE", "error"); renderAll(); return; }
   const combined = `${state.evidence.githubUrl} ${state.evidence.apiUrl} ${state.evidence.notes}`.trim();
-  if(!combined){ pushLog("submit_delivery() rejected: evidence package is empty", "error"); return; }
+  if(!combined){ pushLog("submit_delivery() rejected: evidence package is empty", "error"); renderAll(); return; }
   state.caseState = "SUBMITTED";
   pushLog(`submit_delivery() → evidence package stored on-chain`, "success");
   renderAll();
@@ -340,7 +343,8 @@ function scoreRequirements(evidenceText){
 }
 
 async function requestAdjudication(){
-  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() rejected: case must be SUBMITTED", "error"); return; }
+  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() rejected: case must be SUBMITTED", "error"); renderAll(); return; }
+  if(state.isAdjudicating){ return; } // guard against double-click re-entrancy
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   state.validators = [];
@@ -398,8 +402,8 @@ async function requestAdjudication(){
 }
 
 function raiseAppeal(justification){
-  if(!["ACCEPTED","DISPUTED"].includes(state.caseState)){ pushLog("raise_appeal() rejected: invalid state", "error"); return; }
-  if(!justification.trim()){ pushLog("raise_appeal() rejected: justification required", "error"); return; }
+  if(!["ACCEPTED","DISPUTED"].includes(state.caseState)){ pushLog("raise_appeal() rejected: invalid state", "error"); renderAll(); return; }
+  if(!justification || !justification.trim()){ pushLog("raise_appeal() rejected: justification required", "error"); renderAll(); return; }
   state.appealJustification = justification;
   state.appealed = true;
   state.caseState = "APPEALED";
@@ -408,7 +412,8 @@ function raiseAppeal(justification){
 }
 
 function finalizeSettlement(percent){
-  if(!["ACCEPTED","DISPUTED","APPEALED"].includes(state.caseState)){ pushLog("finalize_and_calculate_settlement() rejected: invalid state", "error"); return; }
+  if(!["ACCEPTED","DISPUTED","APPEALED"].includes(state.caseState)){ pushLog("finalize_and_calculate_settlement() rejected: invalid state", "error"); renderAll(); return; }
+  if(percent === "" || percent === null || isNaN(Number(percent))){ pushLog("finalize_and_calculate_settlement() rejected: percentage must be a number", "error"); renderAll(); return; }
   const p = Math.max(0, Math.min(100, Number(percent)));
   const payout = Math.floor((state.escrowBalance * p) / 100);
   state.settlementAmount = payout;
@@ -419,22 +424,22 @@ function finalizeSettlement(percent){
 }
 
 function settleCase(){
-  if(state.caseState !== "FINALIZED"){ pushLog("settle_case() rejected: case not FINALIZED", "error"); return; }
+  if(state.caseState !== "FINALIZED"){ pushLog("settle_case() rejected: case not FINALIZED", "error"); renderAll(); return; }
   state.caseState = "SETTLED";
   pushLog(`settle_case() → ${state.settlementAmount} USDC released, escrow closed`, "success");
   renderAll();
 }
 
 function resetCase(){
-  const keepId = state.caseId;
   state = {
     ...state,
-    caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""},
+    caseCreated:false, caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""},
     sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null,
     requirementResults:[], computedScore:null, overridePercent:null,
     settlementAmount:null, appealJustification:"", appealed:false,
   };
   pushLog(`— case reset —`, "info");
+  state.activeTab = "buyer";
   renderAll();
 }
 
@@ -604,23 +609,26 @@ function renderScale(){
 /* ------------------------------ tab content ------------------------------ */
 
 function renderBuyerTab(){
-  const disabledCreate = false;
-  const disabledFund = state.caseState !== "DRAFT";
+  const disabledCreate = state.caseCreated;
+  const disabledFund = !state.caseCreated || state.caseState !== "DRAFT";
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
-      <div>
-        <h2 class="font-display text-lg font-600 mb-1">Create &amp; Fund Agreement</h2>
-        <p class="text-sm text-slate-400">Define the case, bind both parties, and lock payment into escrow.</p>
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 class="font-display text-lg font-600 mb-1">Create &amp; Fund Agreement</h2>
+          <p class="text-sm text-slate-400">Define the case, bind both parties, and lock payment into escrow.</p>
+        </div>
+        ${state.caseCreated ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 1 — Case Created</span>` : `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-slate-700/40 text-slate-400 border border-slate-600/40">Step 1 of 2</span>`}
       </div>
 
       <div class="grid md:grid-cols-2 gap-4">
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Case ID</label>
-          <input id="inpCaseId" value="${state.caseId}" class="w-full rounded-lg px-3 py-2" />
+          <input id="inpCaseId" value="${state.caseId}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Provider address</label>
-          <input id="inpProvider" value="${state.providerAddress}" class="w-full rounded-lg px-3 py-2" />
+          <input id="inpProvider" value="${state.providerAddress}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
       </div>
 
@@ -636,18 +644,23 @@ function renderBuyerTab(){
       </div>
 
       <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan w-full md:w-auto px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
-        Create Case
+        ${disabledCreate ? "✓ Case Created" : "Create Case"}
       </button>
 
       <div class="border-t border-slate-700/50 pt-5">
-        <label class="text-xs text-slate-400 mb-1 block">Escrow amount (USDC)</label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="text-xs text-slate-400 block">Escrow amount (USDC)</label>
+          ${state.caseState === "ACTIVE" ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 2 — Escrow Funded</span>` : ''}
+        </div>
         <div class="flex flex-col sm:flex-row gap-3">
-          <input id="inpFundAmount" type="number" min="1" value="500" class="rounded-lg px-3 py-2 sm:w-48" />
+          <input id="inpFundAmount" type="number" min="1" value="500" ${disabledFund?'disabled':''} class="rounded-lg px-3 py-2 sm:w-48 ${disabledFund?'opacity-60':''}" />
           <button id="btnFundCase" ${disabledFund?'disabled':''} class="btn glow-amber px-6 py-3 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-200">
             Fund Escrow
           </button>
         </div>
-        ${disabledFund ? `<p class="text-xs text-slate-500 mt-2">Escrow can only be funded while the case is in <span class="text-slate-300">DRAFT</span>.</p>` : ''}
+        ${!state.caseCreated ? `<p class="text-xs text-slate-500 mt-2">Create the case above to unlock escrow funding.</p>`
+          : state.caseState !== "DRAFT" ? `<p class="text-xs text-slate-500 mt-2">Escrow can only be funded while the case is in <span class="text-slate-300">DRAFT</span>.</p>`
+          : `<p class="text-xs text-slate-500 mt-2">Funding will move this case to <span class="text-cyan-300">ACTIVE</span> and unlock the Provider tab.</p>`}
       </div>
     </div>
   `;
@@ -682,7 +695,7 @@ function renderProviderTab(){
       <button id="btnSubmitDelivery" ${disabled?'disabled':''} class="btn glow-violet px-6 py-3 rounded-xl bg-violet-500/15 border border-violet-400/40 text-violet-200">
         Submit Delivery &amp; Evidence
       </button>
-      ${disabled ? `<p class="text-xs text-slate-500">${state.caseState === "DRAFT" ? "Waiting for buyer to fund escrow." : "Evidence already submitted or case has moved on."}</p>` : ''}
+      ${disabled ? `<p class="text-xs text-slate-500">${!state.caseCreated ? "Waiting for buyer to create the case." : state.caseState === "DRAFT" ? "Waiting for buyer to fund escrow." : "Evidence already submitted or case has moved on."}</p>` : ''}
 
       ${state.sanitizeHits.length ? `
         <div class="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
@@ -839,52 +852,75 @@ function renderTabButtons(){
 
 function bindStaticEvents(){
   document.querySelectorAll(".tabBtnEl").forEach(btn => {
-    btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab")));
+    btn.addEventListener("click", safeHandler(() => setTab(btn.getAttribute("data-tab"))));
   });
 }
 
+// Re-binds every interactive element for the CURRENTLY rendered tab. Called at
+// the end of every renderTabContent(), since that call replaces the tab's
+// innerHTML wholesale — any listeners on the old nodes are gone with them,
+// so this must run every single time or clicks silently stop doing anything.
 function bindTabEvents(){
   const byId = id => document.getElementById(id);
 
   if(state.activeTab === "buyer"){
-    byId("inpCaseId")?.addEventListener("input", e => state.caseId = e.target.value);
-    byId("inpProvider")?.addEventListener("input", e => state.providerAddress = e.target.value);
-    byId("btnCreateCase")?.addEventListener("click", createCase);
-    byId("btnFundCase")?.addEventListener("click", () => {
+    byId("inpCaseId")?.addEventListener("input", e => { state.caseId = e.target.value; });
+    byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
+    byId("btnCreateCase")?.addEventListener("click", safeHandler(createCase));
+    byId("btnFundCase")?.addEventListener("click", safeHandler(() => {
       const amt = Number(byId("inpFundAmount").value);
       fundCase(amt);
-    });
+    }));
   }
 
   if(state.activeTab === "provider"){
-    byId("inpGithub")?.addEventListener("input", e => state.evidence.githubUrl = e.target.value);
-    byId("inpApiUrl")?.addEventListener("input", e => state.evidence.apiUrl = e.target.value);
-    byId("inpNotes")?.addEventListener("input", e => state.evidence.notes = e.target.value);
-    byId("btnSubmitDelivery")?.addEventListener("click", submitDelivery);
+    byId("inpGithub")?.addEventListener("input", e => { state.evidence.githubUrl = e.target.value; });
+    byId("inpApiUrl")?.addEventListener("input", e => { state.evidence.apiUrl = e.target.value; });
+    byId("inpNotes")?.addEventListener("input", e => { state.evidence.notes = e.target.value; });
+    byId("btnSubmitDelivery")?.addEventListener("click", safeHandler(submitDelivery));
   }
 
   if(state.activeTab === "court"){
-    byId("btnAdjudicate")?.addEventListener("click", requestAdjudication);
-    byId("btnAppeal")?.addEventListener("click", () => {
+    byId("btnAdjudicate")?.addEventListener("click", () => {
+      requestAdjudication().catch(err => {
+        console.error("requestAdjudication() failed:", err);
+        state.isAdjudicating = false;
+        pushLog("⚠ internal error during adjudication — see console. UI state preserved.", "error");
+        renderAll();
+      });
+    });
+    byId("btnAppeal")?.addEventListener("click", safeHandler(() => {
       const val = byId("inpAppeal").value;
       raiseAppeal(val);
-    });
-    byId("btnFinalize")?.addEventListener("click", () => {
+    }));
+    byId("btnFinalize")?.addEventListener("click", safeHandler(() => {
       const p = byId("inpPercent").value;
       finalizeSettlement(p);
-    });
-    byId("btnSettle")?.addEventListener("click", settleCase);
-    byId("btnReset")?.addEventListener("click", resetCase);
+    }));
+    byId("btnSettle")?.addEventListener("click", safeHandler(settleCase));
+    byId("btnReset")?.addEventListener("click", safeHandler(resetCase));
   }
 }
 
 function renderAll(){
-  renderStateStrip();
-  renderTabButtons();
-  renderTabContent();
-  renderScale();
-  renderCaseSummary();
-  renderLog();
+  // Each render step is isolated so a failure in one panel can never leave
+  // buttons unbound or the rest of the UI stuck mid-update.
+  const steps = [renderStateStrip, renderTabButtons, renderTabContent, renderScale, renderCaseSummary, renderLog];
+  steps.forEach(step => {
+    try { step(); }
+    catch(err) { console.error(`renderAll() step "${step.name}" failed:`, err); }
+  });
+}
+
+function safeHandler(fn){
+  return function(...args){
+    try { return fn.apply(this, args); }
+    catch(err){
+      console.error(`Handler "${fn.name}" threw:`, err);
+      pushLog(`⚠ internal error in ${fn.name}() — see console. UI state preserved.`, "error");
+      renderAll();
+    }
+  };
 }
 
 bindStaticEvents();
