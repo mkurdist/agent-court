@@ -1,44 +1,32 @@
-# agent-court#
-AgentCourt ⚖️🤖
+# AgentCourt ⚖️🤖
 
-> Trustless Dispute Resolution & Settlement Protocol for Autonomous AI Agents, powered by GenLayer.
+**Trustless Dispute Resolution & Settlement Protocol for Autonomous AI Agents.**
 
-## 🚀 Overview
-**AgentCourt** is a GenLayer-native protocol that enables autonomous agents to enter performance-based agreements, verify real-world web evidence, reach decentralized consensus judgments, and securely execute financial settlements without trusting either party.
+AgentCourt enables autonomous agents to enter performance-based agreements, verify real-world evidence from the Web using GenLayer's non-deterministic runtime, reach decentralized judgments, and settle payments without trusting either party.
 
----
+## 🚀 Key Features
+* **GenLayer Native:** Uses non-deterministic web access (`gl.nondet.web`) for real-world verification.
+* **AI Adjudication:** Leverages LLM reasoning with decentralized validator consensus.
+* **Equivalence Principles:** Ensures robust agreement between validators on structured verdicts.
+* **Prompt Injection Defense:** Native sanitization of untrusted web content.
+* **Escrow-Based Settlement:** Deterministic payment logic triggered by AI-verified outcomes.
+* **Appeal Mechanism:** Support for multi-stage dispute resolution.
 
-## 💡 Why GenLayer?
-Traditional smart contracts (on Ethereum, Solana, etc.) cannot natively fetch unstructured web data or reason about qualitative requirements. AgentCourt leverages GenLayer's **Intelligent Contracts** architecture:
-* **Web Data Access:** Directly fetches and renders web/GitHub evidence within execution.
-* **Non-Deterministic AI Reasoning:** Evaluates complex tasks safely.
-* **Equivalence Principles:** Ensures decentralized validators reach consensus on structured outcomes despite varying natural language reasoning.
-* **Deterministic Settlement:** AI determines facts, but strict contract logic calculates and releases escrow payouts.
+## 🏗️ Architecture
+The protocol follows a strictly defined state machine:
+`DRAFT` -> `FUNDED` -> `ACTIVE` -> `SUBMITTED` -> `ADJUDICATING` -> `ACCEPTED/DISPUTED` -> `APPEALED` -> `RE-ADJUDICATING` -> `FINALIZED` -> `SETTLED`
 
----
+## 🛠️ Tech Stack
+* **Runtime:** GenLayer Intelligent Contracts
+* **Language:** Python
+* **Frontend:** Next.js (Dashboard Interface)
+* **Testing:** GLSim & GenLayer Studio
 
-## 🔄 Core Protocol Lifecycle
-1. **CREATE**: Buyer and Provider define and initialize the agreement.
-2. **FUND**: Buyer locks funds into the secure smart-contract Escrow.
-3. **SUBMIT**: Provider submits their completion evidence package (e.g., GitHub repo/PR).
-4. **ADJUDICATE**: GenLayer validators fetch web evidence, filter prompt-injections, and execute AI judgment.
-5. **SETTLE**: Deterministic calculations release the correct escrow payout to the provider.
-
----
-
-## 🛡️ Security Features
-* **Prompt Injection Defense:** Automatically sanitizes untrusted web evidence to prevent malicious instruction overrides.
-* **Separation of Concerns:** AI handles qualitative verification; smart-contract code strictly executes mathematical escrows.
+## 📂 Project Structure
+- `/contracts`: Core GenLayer intelligent contract logic.
+- `/tests`: Integration and unit tests for contract states.
+- `/docs`: Detailed architecture and security specifications.
+- `/deploy`: Deployment helper scripts.
 
 ---
-
-## 🛠️ Getting Started in GenLayer Studio
-1. Copy `contracts/agent_court.py`.
-2. Open [GenLayer Studio](https://studio.genlayer.com).
-3. Create a new contract, paste the code, and click **Deploy**.
-4. Run through the lifecycle using `create_case`, `fund_case`, `submit_delivery`, `request_adjudication`, `finalize_and_calculate_settlement`, and `settle_case`.
-
----
-
-## 📄 License
-MIT License.
+*Built for the GenLayer Builder Track.*
