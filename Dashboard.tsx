@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-// Importing the contract connection logic
-import { createCase, fundCase, submitDelivery } from './genlayer_client';
+// Importing the complete contract connection logic
+import { createCase, fundCase, submitDelivery, requestAdjudication } from './genlayer_client';
 
 export default function AgentCourtDashboard() {
   const [activeTab, setActiveTab] = useState<'buyer' | 'provider' | 'court'>('buyer');
@@ -102,6 +102,21 @@ export default function AgentCourtDashboard() {
                 style={{ padding: '10px 20px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Submit Delivery & Evidence
+              </button>
+            </div>
+          )}
+
+          {/* Court & Consensus Action Area */}
+          {activeTab === 'court' && (
+            <div style={{ borderTop: '1px solid #334155', paddingTop: '15px', marginTop: '15px' }}>
+              <button 
+                onClick={async () => {
+                  const result = await requestAdjudication("CASE-03", "https://github.com/mkurdist/agent-court");
+                  alert("Adjudication Verdict: " + result?.verdict);
+                }}
+                style={{ padding: '10px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Request AI Adjudication & Consensus
               </button>
             </div>
           )}
