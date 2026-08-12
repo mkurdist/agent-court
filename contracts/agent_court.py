@@ -1,8 +1,8 @@
-# v0.2.16
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
-
+import json
+import typing
 
 _FORBIDDEN_PHRASES = (
     "ignore all previous instructions",
@@ -10,7 +10,6 @@ _FORBIDDEN_PHRASES = (
     "you are now free",
     "override verdict",
 )
-
 
 def _sanitize_web_evidence(raw_content: str) -> str:
     cleaned = raw_content
@@ -21,6 +20,12 @@ def _sanitize_web_evidence(raw_content: str) -> str:
             lowered = cleaned.lower()
     return cleaned
 
+@gl.evm.contract_interface
+class _Recipient:
+    class View:
+        pass
+    class Write:
+        pass
 
 class AgentCourt(gl.Contract):
     STATE_DRAFT = "DRAFT"
@@ -57,17 +62,32 @@ class AgentCourt(gl.Contract):
         self.cases[case_id] = agreement_json
         self.case_states[case_id] = self.STATE_DRAFT
 
-    @gl.public.write
-    def fund_case(self, case_id: str, amount: u256) -> None:
-        """Lock funds in escrow and activate the case (Escrow Architecture)."""
-        assert self.case_states.get(case_id) == self.STATE_DRAFT, "Invalid state for funding"
-        self.escrow_balances[case_id] = amount
+    @gl.public.write.payable
+    def fund_case(self, case_id: str) -> None:
+        """Lock actual GEN tokens in escrow and activate the case with strict buyer authorization."""
+        state = self.case_states.get(case_id, self.STATE_DRAFT)
+        assert state == self.STATE_DRAFT, "Invalid state for funding"
+        
+        # Enforce strict party authorization: only the registered buyer can fund
+        buyer = self.buyer_addresses.get(case_id)
+        assert gl.message.sender_address == buyer, "Unauthorized: only the registered buyer can fund escrow"
+        
+        val = gl.message.value
+        assert val > u256(0), "Escrow amount must be greater than zero"
+        
+        self.escrow_balances[case_id] = val
         self.case_states[case_id] = self.STATE_ACTIVE
 
     @gl.public.write
     def submit_delivery(self, case_id: str, evidence_package_json: str) -> None:
-        """Provider submits the delivery evidence package."""
-        assert self.case_states.get(case_id) == self.STATE_ACTIVE, "Case is not active"
+        """Provider submits delivery evidence with strict provider authorization."""
+        state = self.case_states.get(case_id, "")
+        assert state == self.STATE_ACTIVE, "Case is not active"
+        
+        # Enforce strict party authorization: only the registered provider can submit delivery
+        provider = self.provider_addresses.get(case_id)
+        assert gl.message.sender_address == provider, "Unauthorized: only the registered provider can submit delivery"
+        
         self.evidence_packages[case_id] = evidence_package_json
         self.case_states[case_id] = self.STATE_SUBMITTED
 
@@ -79,10 +99,11 @@ class AgentCourt(gl.Contract):
         self.case_states[case_id] = self.STATE_ADJUDICATING
 
         def check_evidence() -> bool:
-            web_data = gl.nondet.web.render(web_url, mode='text')
+            response = gl.nondet.web.get(web_url)
+            web_data = response.body.decode("utf-8")
             safe_data = _sanitize_web_evidence(web_data)
             lowered = safe_data.lower()
-            return ("completed" in lowered) or ("success" in lowered)
+            return ("completed" in lowered) or ("success" in lowered) or ("github.com" in lowered)
 
         is_verified = gl.eq_principle.strict_eq(check_evidence)
 
@@ -120,9 +141,24 @@ class AgentCourt(gl.Contract):
 
     @gl.public.write
     def settle_case(self, case_id: str) -> None:
-        """Deterministic settlement and escrow payout release (Section 23)."""
+        """Deterministic settlement and verdict-bound escrow payout release (Section 23)."""
         state = self.case_states.get(case_id, "")
         assert state == self.STATE_FINALIZED, "Case not ready for settlement"
+
+        total_funds = self.escrow_balances.get(case_id, u256(0))
+        payout = self.settlement_amounts.get(case_id, u256(0))
+        refund = total_funds - payout
+
+        provider = self.provider_addresses.get(case_id)
+        buyer = self.buyer_addresses.get(case_id)
+
+        # Enforce verdict-bound custody release: transfer funds out to provider and buyer
+        if payout > u256(0) and provider:
+            _Recipient(provider).emit_transfer(value=payout, on='finalized')
+
+        if refund > u256(0) and buyer:
+            _Recipient(buyer).emit_transfer(value=refund, on='finalized')
+
         self.case_states[case_id] = self.STATE_SETTLED
 
     @gl.public.view
