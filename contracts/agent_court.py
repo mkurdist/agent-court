@@ -93,7 +93,7 @@ class AgentCourt(gl.Contract):
 
     @gl.public.write
     def request_adjudication(self, case_id: str, web_url: str) -> str:
-        """Non-deterministic web evidence fetch + Adversarial AI Adjudication via GenLayer LLM."""
+        """Fully dynamic and universal AI Adjudication via GenLayer LLM for any case structure."""
         state = self.case_states.get(case_id, "")
         assert state == self.STATE_SUBMITTED, "Case must be submitted for adjudication"
         self.case_states[case_id] = self.STATE_ADJUDICATING
@@ -101,40 +101,42 @@ class AgentCourt(gl.Contract):
         agreement_json = self.cases.get(case_id, "{}")
 
         def evaluate_evidence() -> bool:
-            # 1. Fetch live web / GitHub repository code securely
+            # 1. Fetch live web / GitHub repository code or documentation securely
             response = gl.nondet.web.get(web_url)
             web_data = response.body.decode("utf-8")
             safe_data = _sanitize_web_evidence(web_data)
 
-            # 2. Construct strict adversarial auditor prompt for decentralized LLM validators
+            # 2. Universal dynamic prompt that reads any custom agreement JSON and matches it against any evidence
             prompt = f"""
-            You are an ultra-strict, adversarial AI Smart Contract Auditor and Judge.
-            Your objective is to find ANY security risk, logic flaw, missing feature, or contradiction between documentation claims and the actual source code.
+            You are an expert, strict, and impartial decentralized AI Smart Contract Judge and Auditor.
+            Your task is to dynamically analyze and cross-verify ANY custom agreement criteria against the provided source code, README, or documentation evidence.
             
-            AGREEMENT REQUIREMENTS / CRITERIA:
+            CUSTOM AGREEMENT & CRITERIA (JSON):
             {agreement_json}
             
-            SOURCE CODE / SUBMITTED EVIDENCE:
-            {safe_data[:3500]}
+            SUBMITTED EVIDENCE / SOURCE CODE / DOCUMENTATION:
+            {safe_data[:4000]}
             
-            INSTRUCTIONS:
-            - Scrutinize the evidence carefully against the criteria.
-            - If there are any security vulnerabilities, missing implementations, unhandled risks, or contradictions between claims and actual code, you MUST output 'DISPUTED'.
-            - Only output 'ACCEPTED' if the code completely and safely fulfills all criteria without exceptions.
+            DYNAMIC EVALUATION INSTRUCTIONS:
+            1. Parse the agreement criteria, requirements, or claims dynamically from the JSON above.
+            2. Examine the submitted evidence/code to check if it genuinely satisfies every single condition, rule, or claim specified in the agreement.
+            3. Detect any contradictions between documentation claims and the actual implementation, missing security features, logic flaws, or unfulfilled requirements.
+            4. If ANY requirement is violated, missing, or contradicted, you MUST output 'DISPUTED'.
+            5. Only output 'ACCEPTED' if all criteria are fully, verifiably, and safely satisfied.
             
-            Respond with ONLY ONE WORD (no extra text or explanation): ACCEPTED or DISPUTED.
+            Respond with ONLY ONE WORD (no punctuation, no explanation): ACCEPTED or DISPUTED.
             """
             
             # 3. Execute prompt via GenLayer non-deterministic LLM execution layer
             llm_response = str(gl.nondet.exec_prompt(prompt)).strip().upper()
             
-            # 4. Strict and safe parsing logic to prevent false positives
+            # 4. Strict evaluation parsing
             if "DISPUTED" in llm_response:
                 return False
             if "ACCEPTED" in llm_response and "DISPUTED" not in llm_response:
                 return True
             
-            # Default to False (Disputed) if the LLM output is ambiguous
+            # Default fallback for ambiguity to ensure platform security
             return False
 
         # GenLayer Equivalence Principle consensus check across validators
