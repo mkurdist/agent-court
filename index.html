@@ -30,6 +30,14 @@
     --ink:#f1f5f9;
     --muted:#94a3b8;
   }
+  body.light-mode{
+    --bg-deep:#f8fafc;
+    --bg-base:#f1f5f9;
+    --panel:rgba(255,255,255,0.85);
+    --panel-border:rgba(148,163,184,0.25);
+    --ink:#0f172a;
+    --muted:#64748b;
+  }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   body{
@@ -41,6 +49,14 @@
     color:var(--ink);
     font-family:'Inter',ui-sans-serif,system-ui,sans-serif;
     min-height:100vh;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+  body.light-mode{
+    background:
+      radial-gradient(ellipse 900px 500px at 12% -10%, rgba(139,92,246,0.08), transparent 60%),
+      radial-gradient(ellipse 900px 600px at 100% 0%, rgba(34,211,238,0.08), transparent 55%),
+      radial-gradient(ellipse 700px 500px at 50% 110%, rgba(251,191,36,0.04), transparent 60%),
+      var(--bg-deep);
   }
   .font-display{font-family:'Space Grotesk',ui-sans-serif,sans-serif;}
   .font-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
@@ -75,6 +91,11 @@
     color:var(--ink);
     font-family:'IBM Plex Mono',monospace;
     font-size:13px;
+  }
+  body.light-mode input, body.light-mode textarea{
+    background:rgba(255,255,255,0.9);
+    border:1px solid rgba(148,163,184,0.3);
+    color:#0f172a;
   }
   input:focus,textarea:focus{
     outline:none; border-color:rgba(34,211,238,0.55);
@@ -168,6 +189,12 @@
         <span class="w-px h-4 bg-slate-600"></span>
         <span class="font-mono text-xs text-amber-300">≥ 66%</span>
       </div>
+
+      <!-- دکمه تغییر تم روز و شب (Theme Toggle) -->
+      <button id="btnThemeToggle" class="btn glass px-3.5 py-2.5 rounded-xl text-slate-300 text-sm whitespace-nowrap flex items-center gap-2 border border-slate-700/60 hover:text-cyan-300 transition-colors">
+        <span id="themeIcon">🌙</span>
+        <span class="font-mono text-xs" id="themeText">Dark</span>
+      </button>
 
       <!-- پروفایل و دکمه اتصال / منوی اکانت -->
       <div class="relative">
@@ -428,8 +455,19 @@ function saveCaseToHistory() {
 }
 
 /* =========================================================================
-   UI HELPERS: Global Toast Notifications & Loading Overlay
+   UI HELPERS: Global Toast Notifications & Loading Overlay & Theme Toggle
    ========================================================================= */
+
+function toggleTheme() {
+  const body = document.body;
+  const themeIcon = document.getElementById("themeIcon");
+  const themeText = document.getElementById("themeText");
+  body.classList.toggle("light-mode");
+  const isLight = body.classList.contains("light-mode");
+  if(themeIcon) themeIcon.textContent = isLight ? "☀️" : "🌙";
+  if(themeText) themeText.textContent = isLight ? "Light" : "Dark";
+  showToast(isLight ? "Light theme activated" : "Dark theme activated");
+}
 
 function showToast(message, type = "success") {
   const container = document.getElementById("toastContainer");
@@ -586,6 +624,7 @@ window.addEventListener("click", () => {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
   document.getElementById("btnDisconnectWallet")?.addEventListener("click", disconnectWallet);
+  document.getElementById("btnThemeToggle")?.addEventListener("click", toggleTheme);
   document.getElementById("btnCopyAddress")?.addEventListener("click", () => {
     const addr = document.getElementById("globalWalletAddress")?.value;
     if(addr) {
