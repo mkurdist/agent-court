@@ -813,6 +813,7 @@ async function requestAdjudication(){
     await client.waitForTransactionReceipt({
       hash: txHash,
       waitUntil: "finalized",
+      timeout: 120000,
     });
 
     const verdictResult = await client.readContract({
@@ -861,7 +862,7 @@ async function raiseAppeal() {
       args: [state.caseId, state.evidence.githubUrl || "https://github.com"],
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseState = "ACCEPTED";
     state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
