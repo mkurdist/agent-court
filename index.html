@@ -121,6 +121,18 @@
 </head>
 <body class="antialiased">
 
+<!-- ============ GLOBAL TOAST NOTIFICATION CONTAINER ============ -->
+<div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3 pointer-events-none"></div>
+
+<!-- ============ GLOBAL LOADING OVERLAY ============ -->
+<div id="globalOverlay" class="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex flex-col items-center justify-center hidden opacity-0 transition-opacity duration-300">
+  <div class="glass p-6 rounded-2xl border border-cyan-500/30 glow-cyan flex flex-col items-center space-y-4 max-w-sm text-center">
+    <div class="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+    <div class="font-display font-600 text-sm text-cyan-200" id="overlayTitle">Processing On-Chain Action</div>
+    <div class="font-mono text-xs text-slate-400 leading-relaxed" id="overlayDesc">Waiting for GenLayer network validators consensus & transaction finality...</div>
+  </div>
+</div>
+
 <div class="max-w-[1400px] mx-auto px-4 md:px-8 py-6">
 
   <!-- ============ HEADER ============ -->
@@ -204,6 +216,34 @@
   <!-- ============ STATE MACHINE STRIP ============ -->
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
     <div id="stateStrip" class="flex items-center gap-1 min-w-[880px] md:min-w-0"></div>
+  </div>
+
+  <!-- ============ INTERACTIVE ONBOARDING STEPPER & CONTEXTUAL HINT ============ -->
+  <div class="glass rounded-2xl px-6 py-4 mb-6 space-y-3">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <span class="font-display text-xs font-600 text-cyan-300 uppercase tracking-wider flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span> Protocol Workflow Stepper
+      </span>
+      <span id="stepperHintBadge" class="font-mono text-xs px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">Step 1: Create Case On-Chain</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
+      <div id="stepCard1" class="p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all">
+        <span class="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px]">1</span>
+        <span>Create Case</span>
+      </div>
+      <div id="stepCard2" class="p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all">
+        <span class="w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]">2</span>
+        <span>Fund Escrow</span>
+      </div>
+      <div id="stepCard3" class="p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all">
+        <span class="w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]">3</span>
+        <span>Submit Evidence</span>
+      </div>
+      <div id="stepCard4" class="p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all">
+        <span class="w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]">4</span>
+        <span>AI Adjudication</span>
+      </div>
+    </div>
   </div>
 
   <!-- ============ MAIN GRID ============ -->
@@ -387,12 +427,88 @@ function saveCaseToHistory() {
   }
 }
 
+/* =========================================================================
+   UI HELPERS: Global Toast Notifications & Loading Overlay
+   ========================================================================= */
+
+function showToast(message, type = "success") {
+  const container = document.getElementById("toastContainer");
+  if(!container) return;
+  const toast = document.createElement("div");
+  const borderColor = type === "success" ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200" : "border-red-500/50 bg-red-500/10 text-red-200";
+  const icon = type === "success" ? "✓" : "✕";
+  
+  toast.className = `glass px-4 py-3 rounded-xl border ${borderColor} font-mono text-xs flex items-center gap-3 shadow-2xl pointer-events-auto fade-up`;
+  toast.innerHTML = `<span class="font-bold">${icon}</span> <span>${escapeHtml(message)}</span>`;
+  
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transition = "opacity 0.4s ease";
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
+}
+
+function showLoadingOverlay(title, desc) {
+  const overlay = document.getElementById("globalOverlay");
+  const tEl = document.getElementById("overlayTitle");
+  const dEl = document.getElementById("overlayDesc");
+  if(tEl) tEl.textContent = title;
+  if(dEl) dEl.textContent = desc;
+  if(overlay) {
+    overlay.classList.remove("hidden");
+    setTimeout(() => overlay.style.opacity = "1", 10);
+  }
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById("globalOverlay");
+  if(overlay) {
+    overlay.style.opacity = "0";
+    setTimeout(() => overlay.classList.add("hidden"), 300);
+  }
+}
+
+function updateWorkflowStepper() {
+  const step1 = document.getElementById("stepCard1");
+  const step2 = document.getElementById("stepCard2");
+  const step3 = document.getElementById("stepCard3");
+  const step4 = document.getElementById("stepCard4");
+  const hintBadge = document.getElementById("stepperHintBadge");
+  
+  if(!step1 || !step2 || !step3 || !step4) return;
+
+  // Reset all
+  [step1, step2, step3, step4].forEach((el, idx) => {
+    el.className = "p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all";
+    el.querySelector("span").className = `w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]`;
+  });
+
+  if(!state.caseCreated) {
+    step1.className = "p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all glow-cyan";
+    step1.querySelector("span").className = "w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px]";
+    if(hintBadge) hintBadge.textContent = "Step 1: Fill Case ID & Create Case On-Chain";
+  } else if(state.caseState === "DRAFT") {
+    step2.className = "p-3 rounded-xl border border-amber-400/50 bg-amber-500/10 text-amber-200 flex items-center gap-2 transition-all glow-amber";
+    step2.querySelector("span").className = "w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-[10px]";
+    if(hintBadge) hintBadge.textContent = "Step 2: Fund Escrow (Lock GEN on-chain)";
+  } else if(state.caseState === "ACTIVE") {
+    step3.className = "p-3 rounded-xl border border-violet-400/50 bg-violet-500/10 text-violet-200 flex items-center gap-2 transition-all glow-violet";
+    step3.querySelector("span").className = "w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 flex items-center justify-center font-bold text-[10px]";
+    if(hintBadge) hintBadge.textContent = "Step 3: Go to Provider Tab & Submit Evidence";
+  } else {
+    step4.className = "p-3 rounded-xl border border-emerald-400/50 bg-emerald-500/10 text-emerald-200 flex items-center gap-2 transition-all glow-green";
+    step4.querySelector("span").className = "w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold text-[10px]";
+    if(hintBadge) hintBadge.textContent = "Step 4: Request AI Adjudication & Settle Case";
+  }
+}
+
 /* ---------------------------- secure wallet connection & profile management ---------------------------- */
 
 async function connectWallet() {
   if (typeof window.ethereum === 'undefined') {
     pushLog("Wallet error: No Web3 wallet detected (MetaMask or Rabby required).", "error");
-    alert("لطفاً یک کیف پول وب۳ (مثل متامسک یا ربی) روی مرورگر خود نصب کنید.");
+    showToast("لطفاً یک کیف پول وب۳ روی مرورگر خود نصب کنید.", "error");
     return;
   }
 
@@ -409,10 +525,12 @@ async function connectWallet() {
     const walletAddress = accounts[0];
     updateWalletUI(walletAddress);
     pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
+    showToast("Wallet connected successfully!");
 
   } catch (err) {
     console.error("Wallet connection failed:", err);
     pushLog(`Wallet connection rejected or failed: ${err.message}`, "error");
+    showToast(`Connection failed: ${err.message}`, "error");
     updateWalletUI(null);
   }
 }
@@ -420,6 +538,7 @@ async function connectWallet() {
 function disconnectWallet() {
   updateWalletUI(null);
   pushLog("Wallet disconnected.", "warn");
+  showToast("Wallet disconnected.", "error");
 }
 
 function updateWalletUI(walletAddress) {
@@ -472,6 +591,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if(addr) {
       navigator.clipboard.writeText(addr);
       pushLog("Wallet address copied to clipboard.", "success");
+      showToast("Address copied to clipboard!");
     }
   });
 });
@@ -483,6 +603,7 @@ if (typeof window.ethereum !== 'undefined') {
     } else {
       updateWalletUI(accounts[0]);
       pushLog(`Active account switched to: ${accounts[0].slice(0, 6)}...`, "info");
+      showToast("Wallet account switched.");
     }
   });
 
@@ -495,11 +616,12 @@ if (typeof window.ethereum !== 'undefined') {
 
 async function createCase(){
   const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("create_case() error: Contract Address is missing", "error"); renderAll(); return; }
-  if(!state.caseId || !state.caseId.trim()){ pushLog("create_case() error: case_id is required", "error"); renderAll(); return; }
-  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("create_case() error: provider address is required", "error"); renderAll(); return; }
+  if(!contractAddress){ pushLog("create_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
+  if(!state.caseId || !state.caseId.trim()){ pushLog("create_case() error: case_id is required", "error"); showToast("Case ID is required", "error"); return; }
+  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("create_case() error: provider address is required", "error"); showToast("Provider address is required", "error"); return; }
   
   try {
+    showLoadingOverlay("Creating Case On-Chain", `Registering case "${state.caseId}" in GenLayer Intelligent Contract...`);
     const client = getClient();
     pushLog(`Sending on-chain transaction: create_case("${state.caseId}")...`, "info");
     
@@ -517,22 +639,27 @@ async function createCase(){
     state.caseCreated = true;
     state.caseState = "DRAFT";
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`create_case success! TxHash: ${txHash}`, "success");
+    showToast("Case created successfully on-chain!");
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`create_case failed: ${err.message}`, "error");
+    showToast(`Transaction failed: ${err.message}`, "error");
   }
 }
 
 async function fundCase(amountGEN){
   const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("fund_case() error: Contract Address is missing", "error"); renderAll(); return; }
-  if(!state.caseCreated){ pushLog("fund_case() error: create the case first", "error"); renderAll(); return; }
-  if(state.caseState !== "DRAFT"){ pushLog("fund_case() error: invalid state for funding", "error"); renderAll(); return; }
-  if(!amountGEN || isNaN(amountGEN) || amountGEN <= 0){ pushLog("fund_case() error: amount must be > 0", "error"); renderAll(); return; }
+  if(!contractAddress){ pushLog("fund_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
+  if(!state.caseCreated){ pushLog("fund_case() error: create the case first", "error"); showToast("Create the case first", "error"); return; }
+  if(state.caseState !== "DRAFT"){ pushLog("fund_case() error: invalid state for funding", "error"); showToast("Invalid state for funding", "error"); return; }
+  if(!amountGEN || isNaN(amountGEN) || amountGEN <= 0){ pushLog("fund_case() error: amount must be > 0", "error"); showToast("Amount must be > 0", "error"); return; }
 
   try {
+    showLoadingOverlay("Locking Escrow Funds", `Transferring ${amountGEN} GEN into payable escrow on GenLayer...`);
     const client = getClient();
     const amountWei = BigInt(amountGEN) * 10n ** 18n; 
     pushLog(`Locking ${amountGEN} GEN into payable escrow on-chain...`, "info");
@@ -552,18 +679,22 @@ async function fundCase(amountGEN){
     state.escrowBalance = amountGEN;
     state.caseState = "ACTIVE";
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN. TxHash: ${txHash}`, "success");
+    showToast(`Escrow funded with ${amountGEN} GEN successfully!`);
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`fund_case failed: ${err.message}`, "error");
+    showToast(`Escrow funding failed: ${err.message}`, "error");
   }
 }
 
 async function submitDelivery(){
   const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("submit_delivery() error: Contract Address is missing", "error"); renderAll(); return; }
-  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() error: case is not ACTIVE", "error"); renderAll(); return; }
+  if(!contractAddress){ pushLog("submit_delivery() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
+  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() error: case is not ACTIVE", "error"); showToast("Case is not ACTIVE", "error"); return; }
   
   const evidencePackage = JSON.stringify({
     githubUrl: state.evidence.githubUrl,
@@ -572,6 +703,7 @@ async function submitDelivery(){
   });
 
   try {
+    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence package on-chain...");
     const client = getClient();
     pushLog(`Submitting delivery evidence package on-chain...`, "info");
 
@@ -588,23 +720,28 @@ async function submitDelivery(){
 
     state.caseState = "SUBMITTED";
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`submit_delivery success! Evidence stored on-chain. TxHash: ${txHash}`, "success");
+    showToast("Delivery evidence submitted on-chain!");
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`submit_delivery failed: ${err.message}`, "error");
+    showToast(`Submission failed: ${err.message}`, "error");
   }
 }
 
 async function requestAdjudication(){
   const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); renderAll(); return; }
-  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() error: case must be SUBMITTED", "error"); renderAll(); return; }
+  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
+  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() error: case must be SUBMITTED", "error"); showToast("Case must be SUBMITTED", "error"); return; }
   if(state.isAdjudicating) return;
 
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
+  showLoadingOverlay("AI Adjudication in Progress", "Executing non-deterministic LLM nodes & waiting for GenLayer validator consensus...");
   pushLog(`Requesting AI adjudication & GenLayer validator consensus on-chain...`, "info");
 
   try {
@@ -633,13 +770,17 @@ async function requestAdjudication(){
     state.isAdjudicating = false;
     state.consensus = { verdict, rate: 1.0 };
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
+    showToast(`Adjudication completed! Verdict: ${verdict}`);
     renderAll();
   } catch(err) {
     console.error(err);
     state.isAdjudicating = false;
     state.caseState = "SUBMITTED";
+    hideLoadingOverlay();
     pushLog(`Adjudication failed: ${err.message}`, "error");
+    showToast(`Adjudication failed: ${err.message}`, "error");
     renderAll();
   }
 }
@@ -647,13 +788,14 @@ async function requestAdjudication(){
 // تابع اعتراض و بازبینی غیرمتمرکز همسو با GenLayer
 async function raiseAppeal() {
   const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); return; }
+  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
   if(!state.appealJustification.trim()) {
     alert("لطفاً دلیل اعتراض یا مستندات تکمیلی را وارد کنید.");
     return;
   }
 
   try {
+    showLoadingOverlay("Running Validator Re-consensus", "Submitting decentralized appeal & re-evaluating with AI nodes...");
     const client = getClient();
     state.caseState = "APPEALED";
     pushLog(`Submitting decentralized appeal & re-running validator consensus...`, "info");
@@ -669,11 +811,15 @@ async function raiseAppeal() {
     state.caseState = "ACCEPTED";
     state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`Validator re-consensus completed after appeal! Verdict updated. TxHash: ${txHash}`, "success");
+    showToast("Appeal processed! Validator consensus updated.");
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`Appeal failed: ${err.message}`, "error");
+    showToast(`Appeal failed: ${err.message}`, "error");
   }
 }
 
@@ -682,6 +828,7 @@ async function finalizeSettlement(percent){
   if(!contractAddress) return;
   
   try {
+    showLoadingOverlay("Finalizing Settlement", `Calculating and registering payout (${percent}%) on-chain...`);
     const client = getClient();
     const p = Math.max(0, Math.min(100, Number(percent)));
     pushLog(`Finalizing and calculating settlement (${p}%) on-chain...`, "info");
@@ -702,11 +849,15 @@ async function finalizeSettlement(percent){
     state.overridePercent = p;
     state.caseState = "FINALIZED";
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`Finalization success! Calculated payout: ${payout} GEN. TxHash: ${txHash}`, "success");
+    showToast(`Settlement finalized: ${payout} GEN`);
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`Finalization failed: ${err.message}`, "error");
+    showToast(`Finalization failed: ${err.message}`, "error");
   }
 }
 
@@ -715,6 +866,7 @@ async function settleCase(){
   if(!contractAddress) return;
 
   try {
+    showLoadingOverlay("Releasing Escrow", "Triggering verdict-bound payout and transferring tokens on-chain...");
     const client = getClient();
     pushLog(`Triggering verdict-bound payout and releasing escrow on-chain...`, "info");
 
@@ -731,11 +883,15 @@ async function settleCase(){
 
     state.caseState = "SETTLED";
     saveCaseToHistory();
+    hideLoadingOverlay();
     pushLog(`settle_case success! Funds released to recipient wallets. TxHash: ${txHash}`, "success");
+    showToast("Escrow released & case fully settled!");
     renderAll();
   } catch(err) {
     console.error(err);
+    hideLoadingOverlay();
     pushLog(`Settlement failed: ${err.message}`, "error");
+    showToast(`Settlement failed: ${err.message}`, "error");
   }
 }
 
@@ -748,6 +904,7 @@ function resetCase(){
     settlementAmount:null, appealJustification:"", appealed:false,
   };
   pushLog(`— case reset —`, "info");
+  showToast("Started new case session.");
   state.activeTab = "buyer";
   renderAll();
 }
@@ -1169,6 +1326,7 @@ function renderAll(){
   renderScale();
   renderCaseSummary();
   renderLog();
+  updateWorkflowStepper();
 }
 
 bindStaticEvents();
