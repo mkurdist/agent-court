@@ -8,7 +8,6 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<!-- بارگذاری کتابخانه رسمی GenLayer JS SDK از طریق CDN یا پکیج‌های سازگار -->
 <script type="importmap">
   {
     "imports": {
@@ -150,10 +149,8 @@
 </head>
 <body class="antialiased">
 
-<!-- ============ GLOBAL TOAST NOTIFICATION CONTAINER ============ -->
 <div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3 pointer-events-none"></div>
 
-<!-- ============ GLOBAL LOADING OVERLAY ============ -->
 <div id="globalOverlay" class="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex flex-col items-center justify-center hidden opacity-0 transition-opacity duration-300">
   <div class="glass p-6 rounded-2xl border border-cyan-500/30 glow-cyan flex flex-col items-center space-y-4 max-w-sm text-center">
     <div class="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
@@ -164,7 +161,6 @@
 
 <div class="max-w-[1400px] mx-auto px-4 md:px-8 py-6">
 
-  <!-- ============ HEADER ============ -->
   <header class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
     <div class="flex items-center gap-4">
       <div class="relative w-12 h-12 shrink-0 float">
@@ -189,7 +185,6 @@
       </div>
     </div>
     
-    <!-- Header user profile and network status -->
     <div class="flex items-center gap-3 self-start lg:self-auto flex-wrap">
       <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
         <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
@@ -198,13 +193,11 @@
         <span class="font-mono text-xs text-amber-300">≥ 66%</span>
       </div>
 
-      <!-- Day and night theme toggle button -->
       <button id="btnThemeToggle" class="btn glass px-3.5 py-2.5 rounded-xl text-slate-300 text-sm whitespace-nowrap flex items-center gap-2 border border-slate-700/60 hover:text-cyan-300 transition-colors">
         <span id="themeIcon">🌙</span>
         <span class="font-mono text-xs" id="themeText">Dark</span>
       </button>
 
-      <!-- Account management dropdown menu -->
       <div class="relative">
         <div id="walletProfileContainer">
           <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2">
@@ -212,7 +205,6 @@
           </button>
         </div>
 
-        <!-- Account dropdown menu -->
         <div id="accountDropdown" class="hidden absolute right-0 mt-2 w-72 glass rounded-2xl p-4 shadow-2xl border border-slate-700/80 z-50 fade-up">
           <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
             <span class="font-mono text-xs text-slate-400">Connected Account</span>
@@ -236,7 +228,6 @@
     </div>
   </header>
 
-  <!-- ============ CONFIG & NETWORK PANEL ============ -->
   <div class="glass rounded-2xl px-6 py-4 mb-6 grid md:grid-cols-2 gap-4 items-center">
     <div>
       <label class="text-xs text-slate-400 block mb-1">Smart Contract Address</label>
@@ -248,12 +239,10 @@
     </div>
   </div>
 
-  <!-- ============ STATE MACHINE STRIP ============ -->
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
     <div id="stateStrip" class="flex items-center gap-1 min-w-[880px] md:min-w-0"></div>
   </div>
 
-  <!-- ============ INTERACTIVE ONBOARDING STEPPER & CONTEXTUAL HINT ============ -->
   <div class="glass rounded-2xl px-6 py-4 mb-6 space-y-3">
     <div class="flex items-center justify-between flex-wrap gap-2">
       <span class="font-display text-xs font-600 text-cyan-300 uppercase tracking-wider flex items-center gap-2">
@@ -281,13 +270,9 @@
     </div>
   </div>
 
-  <!-- ============ MAIN GRID ============ -->
   <div class="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-6">
 
-    <!-- LEFT: main workflow panel -->
     <div class="space-y-6">
-
-      <!-- Tabs (including new History tab) -->
       <div class="glass rounded-2xl p-1.5 flex gap-1.5 flex-wrap">
         <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">🏛️ Buyer</button>
         <button data-tab="provider" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">⚙️ Provider</button>
@@ -298,10 +283,7 @@
       <div id="tabContent"></div>
     </div>
 
-    <!-- RIGHT: sidebar -->
     <div class="space-y-6">
-
-      <!-- Scales widget -->
       <div class="glass rounded-2xl p-5 glow-violet">
         <div class="flex items-center justify-between mb-3">
           <h3 class="font-display text-sm font-600 text-slate-200">Live Verdict Scale</h3>
@@ -313,13 +295,11 @@
         </div>
       </div>
 
-      <!-- Case summary -->
       <div class="glass rounded-2xl p-5">
         <h3 class="font-display text-sm font-600 text-slate-200 mb-3">Case Summary</h3>
         <div id="caseSummary" class="space-y-2 text-[13px] font-mono"></div>
       </div>
 
-      <!-- Activity log -->
       <div class="glass rounded-2xl p-5">
         <h3 class="font-display text-sm font-600 text-slate-200 mb-3 flex items-center gap-2">
           <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span> Chain Activity
@@ -330,7 +310,6 @@
     </div>
   </div>
 
-  <!-- ============ FOOTER ============ -->
   <footer class="mt-12 pt-8 border-t border-slate-800/80 font-mono text-xs">
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       <div>
@@ -371,10 +350,6 @@
 </div>
 
 <script type="module">
-/* =========================================================================
-   AGENTCOURT DASHBOARD — Real GenLayer SDK Integration
-   ========================================================================= */
-
 import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
@@ -400,12 +375,20 @@ const DEFAULT_AGREEMENT = {
   case_id: "AC-0001",
   payment: "500 GEN",
   deadline: 1788000000,
+  project_scope: "Code and Documentation Verification Challenge",
+  expected_claims: [
+    "OAuth2 Authentication must be mandatory for all API routes",
+    "Rate Limiting must be implemented to protect against DoS attacks",
+    "AES-256 Encryption must be applied to all sensitive stored data",
+    "Input Sanitization must fully protect against SQL Injection"
+  ],
   requirements: [
     { id: "R1", description: "OAuth2 Authentication mandatory for all API routes", weight: 25 },
     { id: "R2", description: "Rate Limiting implemented against DoS attacks", weight: 25 },
     { id: "R3", description: "AES-256 Encryption applied to all stored sensitive data", weight: 25 },
     { id: "R4", description: "Input Sanitization fully protects against SQL Injection", weight: 25 }
-  ]
+  ],
+  adjudication_directive: "Cross-verify the submitted source code or documentation against these claims. If any claim is missing, incomplete, or contradicted by the code, you must strictly rule DISPUTED. Rule ACCEPTED only if all conditions are fully met."
 };
 
 let state = {
@@ -471,10 +454,6 @@ function saveCaseToHistory() {
     existing.escrow = state.escrowBalance;
   }
 }
-
-/* =========================================================================
-   UI HELPERS: Global Toast Notifications & Loading Overlay & Theme Toggle
-   ========================================================================= */
 
 function toggleTheme() {
   const body = document.body;
@@ -557,8 +536,6 @@ function updateWorkflowStepper() {
     if(hintBadge) hintBadge.textContent = "Step 4: Request AI Adjudication & Settle Case";
   }
 }
-
-/* ---------------------------- secure wallet connection & profile management ---------------------------- */
 
 async function connectWallet() {
   if (typeof window.ethereum === 'undefined') {
@@ -667,8 +644,6 @@ if (typeof window.ethereum !== 'undefined') {
     window.location.reload();
   });
 }
-
-/* ---------------------------- real contract calls ---------------------------- */
 
 async function createCase(){
   const contractAddress = getContractAddress();
@@ -898,6 +873,7 @@ async function finalizeSettlement(percent){
     await client.waitForTransactionReceipt({
       hash: txHash,
       waitUntil: "finalized",
+      timeout: 120000,
     });
 
     const payout = Math.floor((state.escrowBalance * p) / 100);
@@ -935,6 +911,7 @@ async function settleCase(){
     await client.waitForTransactionReceipt({
       hash: txHash,
       waitUntil: "finalized",
+      timeout: 120000,
     });
 
     state.caseState = "SETTLED";
@@ -966,8 +943,6 @@ function resetCase(){
 }
 
 function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
-
-/* ------------------------------- rendering ------------------------------- */
 
 function setTab(t){ state.activeTab = t; renderAll(); }
 
@@ -1096,8 +1071,6 @@ function renderScale(){
   </svg>`;
 }
 
-/* ------------------------------ tab content ------------------------------ */
-
 function renderBuyerTab(){
   const disabledCreate = state.caseCreated;
   const disabledFund = !state.caseCreated || state.caseState !== "DRAFT";
@@ -1123,7 +1096,7 @@ function renderBuyerTab(){
       </div>
 
       <div>
-        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements</label>
+        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims</label>
         <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden">
           ${state.agreement.requirements.map(r => `
             <div class="flex items-center justify-between px-3 py-2 text-sm">
@@ -1164,8 +1137,8 @@ function renderProviderTab(){
 
       <div class="grid md:grid-cols-2 gap-4">
         <div>
-          <label class="text-xs text-slate-400 mb-1 block">GitHub repository URL</label>
-          <input id="inpGithub" value="${state.evidence.githubUrl}" placeholder="https://github.com/you/agent-court" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
+          <label class="text-xs text-slate-400 mb-1 block">GitHub repository URL / Raw Document URL</label>
+          <input id="inpGithub" value="${state.evidence.githubUrl}" placeholder="https://raw.githubusercontent.com/.../README_mismatch.md" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Live API URL</label>
@@ -1207,16 +1180,19 @@ function renderCourtTab(){
       ${state.consensus ? `
         <div class="rounded-xl border ${state.consensus.verdict==='ACCEPTED'?'border-emerald-500/40 bg-emerald-500/10':'border-red-500/40 bg-red-500/10'} p-4 flex items-center justify-between flex-wrap gap-3">
           <div>
-            <div class="font-mono text-xs text-slate-400 mb-1">Verdict</div>
+            <div class="font-mono text-xs text-slate-400 mb-1">Verdict Result</div>
             <div class="font-display text-2xl font-700 ${state.consensus.verdict==='ACCEPTED'?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
+          </div>
+          <div class="text-right">
+            <span class="font-mono text-xs text-slate-300">GenLayer Validator Consensus</span>
           </div>
         </div>
 
         <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
           <div class="flex items-center justify-between">
-            <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Validator Consensus Breakdown</span>
+            <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Itemized Requirement Breakdown</span>
             <span class="font-mono text-[11px] ${isDisputed ? 'text-red-300 bg-red-500/10 border-red-500/25' : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'} px-2 py-0.5 rounded border">
-                ${isDisputed ? 'Consensus: DISPUTED' : '3/3 Nodes Agreed (100%)'}
+                ${isDisputed ? 'Verdict Reasoning: Requirements Failed / Contradicted' : 'All Requirements Verified Satisfied'}
             </span>
           </div>
           <div class="space-y-2 text-xs font-mono">
@@ -1236,7 +1212,7 @@ function renderCourtTab(){
       ${isDisputed ? `
         <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
           <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Dispute Detected — Request Validator Re-consensus</h3>
-          <p class="text-xs text-slate-300">The validator consensus returned a DISPUTED state. Submit appeal justification for decentralized re-evaluation by AI nodes.</p>
+          <p class="text-xs text-slate-300">The validator consensus returned a DISPUTED state due to unfulfilled or contradicted requirements. Submit appeal justification for decentralized re-evaluation by AI nodes.</p>
           <textarea id="inpAppealJustification" rows="3" placeholder="Provide appeal justification or updated repository reference..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
           <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
             Submit Appeal &amp; Re-run Validator Consensus
