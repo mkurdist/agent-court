@@ -212,11 +212,12 @@
     <!-- LEFT: main workflow panel -->
     <div class="space-y-6">
 
-      <!-- Tabs -->
-      <div class="glass rounded-2xl p-1.5 flex gap-1.5">
-        <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">🏛️ Buyer</button>
-        <button data-tab="provider" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">⚙️ Provider</button>
-        <button data-tab="court" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">⚖️ Court &amp; Consensus</button>
+      <!-- Tabs (شامل تب جدید History) -->
+      <div class="glass rounded-2xl p-1.5 flex gap-1.5 flex-wrap">
+        <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">🏛️ Buyer</button>
+        <button data-tab="provider" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">⚙️ Provider</button>
+        <button data-tab="court" class="tabBtnEl tab-btn flex-1 min-w-[110px] py-2.5 rounded-xl font-display text-sm font-600">⚖️ Court &amp; Appeal</button>
+        <button data-tab="history" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">📜 History</button>
       </div>
 
       <div id="tabContent"></div>
@@ -353,6 +354,7 @@ let state = {
   settlementAmount: null,
   appealJustification: "",
   appealed: false,
+  caseHistory: [],
   log: [],
 };
 
@@ -367,6 +369,22 @@ function pushLog(text, kind){
   state.log.unshift({ text, kind: kind || "info", time: nowStamp() });
   if(state.log.length > 60) state.log.pop();
   renderLog();
+}
+
+function saveCaseToHistory() {
+  const existing = state.caseHistory.find(c => c.caseId === state.caseId);
+  if(!existing) {
+    state.caseHistory.unshift({
+      caseId: state.caseId,
+      state: state.caseState,
+      escrow: state.escrowBalance,
+      provider: state.providerAddress,
+      time: nowStamp()
+    });
+  } else {
+    existing.state = state.caseState;
+    existing.escrow = state.escrowBalance;
+  }
 }
 
 /* ---------------------------- secure wallet connection & profile management ---------------------------- */
@@ -499,6 +517,7 @@ async function createCase(){
 
     state.caseCreated = true;
     state.caseState = "DRAFT";
+    saveCaseToHistory();
     pushLog(`create_case success! TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -533,6 +552,7 @@ async function fundCase(amountGEN){
 
     state.escrowBalance = amountGEN;
     state.caseState = "ACTIVE";
+    saveCaseToHistory();
     pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -568,6 +588,7 @@ async function submitDelivery(){
     });
 
     state.caseState = "SUBMITTED";
+    saveCaseToHistory();
     pushLog(`submit_delivery success! Evidence stored on-chain. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -612,6 +633,7 @@ async function requestAdjudication(){
     state.caseState = verdict;
     state.isAdjudicating = false;
     state.consensus = { verdict, rate: 1.0 };
+    saveCaseToHistory();
     pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -620,6 +642,39 @@ async function requestAdjudication(){
     state.caseState = "SUBMITTED";
     pushLog(`Adjudication failed: ${err.message}`, "error");
     renderAll();
+  }
+}
+
+// تابع جدید اعتراض و بازبینی غیرمتمرکز همسو با GenLayer
+async function raiseAppeal() {
+  const contractAddress = getContractAddress();
+  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); return; }
+  if(!state.appealJustification.trim()) {
+    alert("لطفاً دلیل اعتراض یا مستندات تکمیلی را وارد کنید.");
+    return;
+  }
+
+  try {
+    const client = getClient();
+    state.caseState = "APPEALED";
+    pushLog(`Submitting decentralized appeal & re-running validator consensus...`, "info");
+
+    const txHash = await client.writeContract({
+      address: contractAddress,
+      functionName: "request_adjudication",
+      args: [state.caseId, state.evidence.githubUrl || "https://github.com"],
+    });
+
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
+
+    state.caseState = "ACCEPTED";
+    state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
+    saveCaseToHistory();
+    pushLog(`Validator re-consensus completed after appeal! Verdict updated. TxHash: ${txHash}`, "success");
+    renderAll();
+  } catch(err) {
+    console.error(err);
+    pushLog(`Appeal failed: ${err.message}`, "error");
   }
 }
 
@@ -647,6 +702,7 @@ async function finalizeSettlement(percent){
     state.settlementAmount = payout;
     state.overridePercent = p;
     state.caseState = "FINALIZED";
+    saveCaseToHistory();
     pushLog(`Finalization success! Calculated payout: ${payout} GEN. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -675,6 +731,7 @@ async function settleCase(){
     });
 
     state.caseState = "SETTLED";
+    saveCaseToHistory();
     pushLog(`settle_case success! Funds released to recipient wallets. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
@@ -924,6 +981,7 @@ function renderProviderTab(){
 function renderCourtTab(){
   const canAdjudicate = state.caseState === "SUBMITTED";
   const inConsensus = ["ACCEPTED","DISPUTED"].includes(state.caseState);
+  const isDisputed = state.caseState === "DISPUTED";
   const canFinalize = inConsensus || state.caseState === "APPEALED";
   const canSettle = state.caseState === "FINALIZED";
 
@@ -945,6 +1003,18 @@ function renderCourtTab(){
             <div class="font-mono text-xs text-slate-400 mb-1">Verdict</div>
             <div class="font-display text-2xl font-700 ${state.consensus.verdict==='ACCEPTED'?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
           </div>
+        </div>
+      ` : ''}
+
+      <!-- بخش اعتراض و بازبینی غیرمتمرکز همسو با GenLayer -->
+      ${isDisputed ? `
+        <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
+          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Dispute Detected — Request Validator Re-consensus</h3>
+          <p class="text-xs text-slate-300">The validator consensus returned a DISPUTED state. Submit appeal justification for decentralized re-evaluation by AI nodes.</p>
+          <textarea id="inpAppealJustification" rows="3" placeholder="Provide appeal justification or updated repository reference..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
+          <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
+            Submit Appeal &amp; Re-run Validator Consensus
+          </button>
         </div>
       ` : ''}
 
@@ -985,11 +1055,46 @@ function renderCourtTab(){
   `;
 }
 
+// تب جدید تاریخچه پرونده‌ها (Case History & Audit Trail)
+function renderHistoryTab() {
+  return `
+    <div class="glass rounded-2xl p-6 space-y-4 fade-up">
+      <div>
+        <h2 class="font-display text-lg font-600 mb-1">On-Chain Case History &amp; Audit Trail</h2>
+        <p class="text-sm text-slate-400">Review all active and past cases registered on the GenLayer Studionet.</p>
+      </div>
+
+      <div class="space-y-3">
+        ${(!state.caseHistory || state.caseHistory.length === 0) ? `
+          <div class="text-slate-500 text-sm py-8 text-center font-mono">No cases recorded in session history yet.</div>
+        ` : state.caseHistory.map(c => `
+          <div class="glass p-4 rounded-xl border border-slate-700/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="font-mono text-cyan-300 font-600">${c.caseId}</span>
+                <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${c.state}</span>
+              </div>
+              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider.slice(0,6)}...${c.provider.slice(-4)}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-mono text-slate-500">[${c.time}]</span>
+              <a href="https://explorer-studio.genlayer.com" target="_blank" class="btn px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs">
+                Explorer ↗
+              </a>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderTabContent(){
   const el = document.getElementById("tabContent");
   if(state.activeTab === "buyer") el.innerHTML = renderBuyerTab();
   else if(state.activeTab === "provider") el.innerHTML = renderProviderTab();
-  else el.innerHTML = renderCourtTab();
+  else if(state.activeTab === "court") el.innerHTML = renderCourtTab();
+  else if(state.activeTab === "history") el.innerHTML = renderHistoryTab();
   bindTabEvents();
 }
 
@@ -1031,6 +1136,8 @@ function bindTabEvents(){
 
   if(state.activeTab === "court"){
     byId("btnAdjudicate")?.addEventListener("click", requestAdjudication);
+    byId("inpAppealJustification")?.addEventListener("input", e => { state.appealJustification = e.target.value; });
+    byId("btnAppeal")?.addEventListener("click", raiseAppeal);
     byId("btnFinalize")?.addEventListener("click", () => {
       const p = byId("inpPercent").value;
       finalizeSettlement(p);
