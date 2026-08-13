@@ -1,0 +1,13 @@
+{
+  "case_id": "AC-0001",
+  "payment": "500 GEN",
+  "deadline": 1788000000,
+  "project_scope": "Code and Documentation Verification Challenge",
+  "expected_claims": [
+    "OAuth2 Authentication must be mandatory for all API routes",
+    "Rate Limiting must be implemented to protect against DoS attacks",
+    "AES-256 Encryption must be applied to all sensitive stored data",
+    "Input Sanitization must fully protect against SQL Injection"
+  ],
+  "adjudication_directive": "Cross-verify the submitted source code or documentation against these claims. If any claim is missing, incomplete, or contradicted by the code, you must strictly rule DISPUTED. Rule ACCEPTED only if all conditions are fully met."
+}
