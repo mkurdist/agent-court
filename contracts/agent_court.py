@@ -93,19 +93,47 @@ class AgentCourt(gl.Contract):
 
     @gl.public.write
     def request_adjudication(self, case_id: str, web_url: str) -> str:
-        """Non-deterministic web evidence fetch + AI adjudication (Section 10)."""
+        """Non-deterministic web evidence fetch + Real Professional AI Adjudication via GenLayer LLM."""
         state = self.case_states.get(case_id, "")
         assert state == self.STATE_SUBMITTED, "Case must be submitted for adjudication"
         self.case_states[case_id] = self.STATE_ADJUDICATING
 
-        def check_evidence() -> bool:
+        agreement_json = self.cases.get(case_id, "{}")
+
+        def evaluate_evidence() -> bool:
+            # 1. Fetch live web / GitHub repository code securely
             response = gl.nondet.web.get(web_url)
             web_data = response.body.decode("utf-8")
             safe_data = _sanitize_web_evidence(web_data)
-            lowered = safe_data.lower()
-            return ("completed" in lowered) or ("success" in lowered) or ("github.com" in lowered)
 
-        is_verified = gl.eq_principle.strict_eq(check_evidence)
+            # 2. Construct strict auditor prompt for decentralized LLM validators
+            prompt = f"""
+            You are a strict, objective decentralized AI Smart Contract Auditor and Judge.
+            Analyze the agreement requirements and the provided source code or documentation evidence below.
+            
+            AGREEMENT REQUIREMENTS / CRITERIA:
+            {agreement_json}
+            
+            SOURCE CODE / SUBMITTED EVIDENCE:
+            {safe_data[:3500]}
+            
+            INSTRUCTIONS:
+            - Perform a thorough security and logic audit.
+            - Check for hidden logic bugs, unhandled exceptions, race conditions, or contradictions between README claims and actual code.
+            - If any critical flaws, security risks, or contract breaches are detected, output 'DISPUTED'.
+            - If the code genuinely and safely fulfills the requirements, output 'ACCEPTED'.
+            
+            Respond with ONLY ONE WORD (no extra text): ACCEPTED or DISPUTED.
+            """
+            
+            # 3. Execute prompt via GenLayer non-deterministic LLM execution layer
+            llm_response = str(gl.nondet.exec_prompt(prompt)).strip().upper()
+            
+            # Returns True if ACCEPTED, False if DISPUTED
+            return "ACCEPTED" in llm_response and "DISPUTED" not in llm_response
+
+        # GenLayer Equivalence Principle consensus check across validators
+        is_verified = gl.eq_principle.strict_eq(evaluate_evidence)
 
         if is_verified:
             verdict = "ACCEPTED"
