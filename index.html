@@ -156,14 +156,19 @@
   </header>
 
   <!-- ============ CONFIG & NETWORK PANEL ============ -->
-  <div class="glass rounded-2xl px-6 py-4 mb-6 grid md:grid-cols-2 gap-4">
+  <div class="glass rounded-2xl px-6 py-4 mb-6 grid md:grid-cols-2 gap-4 items-center">
     <div>
       <label class="text-xs text-slate-400 block mb-1">Smart Contract Address</label>
-      <input id="globalContractAddress" placeholder="0x..." class="w-full rounded-lg px-3 py-2" />
+      <input id="globalContractAddress" value="0xC0A2EbEfA1df7D2a2Ed97EBe3d9E1d4886A52c80" class="w-full rounded-lg px-3 py-2" />
     </div>
     <div>
-      <label class="text-xs text-slate-400 block mb-1">Your Wallet Address (msg.sender)</label>
-      <input id="globalWalletAddress" placeholder="0x..." class="w-full rounded-lg px-3 py-2" />
+      <label class="text-xs text-slate-400 block mb-1">Connected Wallet (msg.sender)</label>
+      <div class="flex gap-2">
+        <input id="globalWalletAddress" placeholder="Not connected..." readonly class="w-full rounded-lg px-3 py-2 bg-slate-900/50 text-cyan-300 cursor-not-allowed" />
+        <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap">
+          Connect Wallet
+        </button>
+      </div>
     </div>
   </div>
 
@@ -299,6 +304,65 @@ function pushLog(text, kind){
   renderLog();
 }
 
+/* ---------------------------- secure wallet connection ---------------------------- */
+
+async function connectWallet() {
+  if (typeof window.ethereum === 'undefined') {
+    pushLog("Wallet error: No Web3 wallet detected (MetaMask or Rabby required).", "error");
+    alert("لطفاً یک کیف پول وب۳ (مثل متامسک یا ربی) روی مرورگر خود نصب کنید.");
+    return;
+  }
+
+  try {
+    const btn = document.getElementById("btnConnectWallet");
+    if(btn) btn.textContent = "Connecting...";
+
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    
+    if (!accounts || accounts.length === 0) {
+      throw new Error("No accounts found");
+    }
+
+    const walletAddress = accounts[0];
+    const walletInput = document.getElementById("globalWalletAddress");
+    if(walletInput) walletInput.value = walletAddress;
+
+    if(btn) {
+      btn.textContent = walletAddress.slice(0, 6) + "..." + walletAddress.slice(-4);
+      btn.className = "btn px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-sm whitespace-nowrap";
+    }
+
+    pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
+
+  } catch (err) {
+    console.error("Wallet connection failed:", err);
+    pushLog(`Wallet connection rejected or failed: ${err.message}`, "error");
+    const btn = document.getElementById("btnConnectWallet");
+    if(btn) btn.textContent = "Connect Wallet";
+  }
+}
+
+if (typeof window.ethereum !== 'undefined') {
+  window.ethereum.on('accountsChanged', (accounts) => {
+    if (accounts.length === 0) {
+      pushLog("Wallet disconnected by user.", "warn");
+      document.getElementById("globalWalletAddress").value = "";
+      const btn = document.getElementById("btnConnectWallet");
+      if(btn) {
+        btn.textContent = "Connect Wallet";
+        btn.className = "btn glow-cyan px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap";
+      }
+    } else {
+      document.getElementById("globalWalletAddress").value = accounts[0];
+      pushLog(`Active account switched to: ${accounts[0].slice(0, 6)}...`, "info");
+    }
+  });
+
+  window.ethereum.on('chainChanged', (_chainId) => {
+    window.location.reload();
+  });
+}
+
 /* ---------------------------- real contract calls ---------------------------- */
 
 async function createCase(){
@@ -341,14 +405,14 @@ async function fundCase(amountGEN){
 
   try {
     const client = getClient();
-    const amountWei = BigInt(amountGEN) * 10n ** 18n; // تبدیل GEN به Wei
+    const amountWei = BigInt(amountGEN) * 10n ** 18n; 
     pushLog(`Locking ${amountGEN} GEN into payable escrow on-chain...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
       functionName: "fund_case",
       args: [state.caseId],
-      value: amountWei, // ارسال توکن واقعی به متد payable
+      value: amountWei, 
     });
 
     await client.waitForTransactionReceipt({
@@ -422,12 +486,11 @@ async function requestAdjudication(){
       args: [state.caseId, targetUrl],
     });
 
-    const receipt = await client.waitForTransactionReceipt({
+    await client.waitForTransactionReceipt({
       hash: txHash,
       waitUntil: "finalized",
     });
 
-    // خواندن نتیجه داوری از قرارداد بعد از اتمام اجماع
     const verdictResult = await client.readContract({
       address: contractAddress,
       functionName: "get_adjudication_result",
@@ -580,7 +643,7 @@ function renderCaseSummary(){
   el.innerHTML = `
     <div class="flex justify-between"><span class="text-slate-500">case_id</span><span class="text-cyan-300">${state.caseId}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">state</span><span class="px-2 py-0.5 rounded ${cls} text-[11px]">${label}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${state.buyerAddress || "Connected Wallet"}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${document.getElementById("globalWalletAddress")?.value || "Connected Wallet"}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">provider</span><span>${state.providerAddress}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">escrow</span><span class="text-amber-300">${state.escrowBalance} GEN</span></div>
     <div class="flex justify-between"><span class="text-slate-500">verdict</span><span>${state.consensus ? state.consensus.verdict : "—"}</span></div>
@@ -823,6 +886,7 @@ function bindStaticEvents(){
   document.querySelectorAll(".tabBtnEl").forEach(btn => {
     btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab")));
   });
+  document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
 }
 
 function bindTabEvents(){
