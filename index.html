@@ -147,11 +147,45 @@
         <p class="text-[13px] text-slate-400 mt-1">Trustless dispute resolution &amp; settlement for autonomous agents — running on GenLayer network</p>
       </div>
     </div>
-    <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3 self-start lg:self-auto">
-      <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
-      <span class="font-mono text-xs text-slate-300">GenLayer Network Connected</span>
-      <span class="w-px h-4 bg-slate-600"></span>
-      <span class="font-mono text-xs text-amber-300">consensus ≥ 66%</span>
+    
+    <!-- پروفایل کاربری هدر و وضعیت شبکه -->
+    <div class="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+      <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+        <span class="font-mono text-xs text-slate-300">GenLayer Network</span>
+        <span class="w-px h-4 bg-slate-600"></span>
+        <span class="font-mono text-xs text-amber-300">≥ 66%</span>
+      </div>
+
+      <!-- پروفایل و دکمه اتصال / منوی اکانت -->
+      <div class="relative">
+        <div id="walletProfileContainer">
+          <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2">
+            <span>Connect Wallet</span>
+          </button>
+        </div>
+
+        <!-- منوی کشویی مدیریت اکانت (Dropdown) -->
+        <div id="accountDropdown" class="hidden absolute right-0 mt-2 w-72 glass rounded-2xl p-4 shadow-2xl border border-slate-700/80 z-50 fade-up">
+          <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
+            <span class="font-mono text-xs text-slate-400">Connected Account</span>
+            <span class="flex items-center gap-1.5 font-mono text-[11px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/25">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Studionet
+            </span>
+          </div>
+          <div class="mb-3">
+            <div id="dropdownFullAddress" class="font-mono text-xs text-cyan-300 bg-slate-900/60 p-2 rounded-lg break-all border border-slate-800">0x...</div>
+          </div>
+          <div class="space-y-2">
+            <button id="btnCopyAddress" class="w-full btn py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 text-xs flex items-center justify-center gap-2 border border-slate-700">
+              📋 Copy Full Address
+            </button>
+            <button id="btnDisconnectWallet" class="w-full btn py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs flex items-center justify-center gap-2 border border-red-500/30">
+              🔌 Disconnect Wallet
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -162,13 +196,8 @@
       <input id="globalContractAddress" value="0xC0A2EbEfA1df7D2a2Ed97EBe3d9E1d4886A52c80" class="w-full rounded-lg px-3 py-2" />
     </div>
     <div>
-      <label class="text-xs text-slate-400 block mb-1">Connected Wallet (msg.sender)</label>
-      <div class="flex gap-2">
-        <input id="globalWalletAddress" placeholder="Not connected..." readonly class="w-full rounded-lg px-3 py-2 bg-slate-900/50 text-cyan-300 cursor-not-allowed" />
-        <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap">
-          Connect Wallet
-        </button>
-      </div>
+      <label class="text-xs text-slate-400 block mb-1">Active Wallet Address (msg.sender)</label>
+      <input id="globalWalletAddress" placeholder="Not connected..." readonly class="w-full rounded-lg px-3 py-2 bg-slate-900/50 text-cyan-300 cursor-not-allowed" />
     </div>
   </div>
 
@@ -225,8 +254,43 @@
     </div>
   </div>
 
-  <footer class="text-center text-[11px] text-slate-600 mt-10 pb-4 font-mono">
-    AgentCourt Protocol — Real GenLayer Intelligent Contract Integration.
+  <!-- ============ FOOTER ============ -->
+  <footer class="mt-12 pt-8 border-t border-slate-800/80 font-mono text-xs">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div>
+        <h4 class="font-display text-sm font-600 text-slate-200 mb-3">AgentCourt Protocol</h4>
+        <p class="text-slate-400 text-[12px] leading-relaxed">
+          Trustless dispute resolution &amp; settlement for autonomous agents powered by GenLayer intelligent contracts.
+        </p>
+      </div>
+      <div>
+        <h4 class="font-display text-sm font-600 text-slate-200 mb-3">GenLayer Ecosystem</h4>
+        <ul class="space-y-2 text-slate-400">
+          <li><a href="https://genlayer.com" target="_blank" class="hover:text-cyan-400 transition-colors">Official Website</a></li>
+          <li><a href="https://studio.genlayer.com" target="_blank" class="hover:text-cyan-400 transition-colors">GenLayer Studio</a></li>
+          <li><a href="https://explorer-studio.genlayer.com" target="_blank" class="hover:text-cyan-400 transition-colors">Explorer (Studionet)</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-display text-sm font-600 text-slate-200 mb-3">Developer Resources</h4>
+        <ul class="space-y-2 text-slate-400">
+          <li><a href="https://docs.genlayer.com" target="_blank" class="hover:text-cyan-400 transition-colors">Documentation</a></li>
+          <li><a href="https://studio.genlayer.com" target="_blank" class="hover:text-cyan-400 transition-colors">Testnet Faucet (Built-in)</a></li>
+          <li><a href="https://github.com/genlayer" target="_blank" class="hover:text-cyan-400 transition-colors">GitHub Repository</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-display text-sm font-600 text-slate-200 mb-3">Network Status</h4>
+        <div class="glass p-3 rounded-xl space-y-1.5 text-[11px]">
+          <div class="flex justify-between text-slate-400"><span>Chain ID:</span><span class="text-slate-200">61999</span></div>
+          <div class="flex justify-between text-slate-400"><span>Currency:</span><span class="text-amber-300">GEN</span></div>
+          <div class="flex justify-between text-slate-400"><span>Consensus:</span><span class="text-emerald-300">Active</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="text-center text-[11px] text-slate-600 pt-4 border-t border-slate-900">
+      AgentCourt Protocol — Real GenLayer Intelligent Contract Integration. All rights reserved.
+    </div>
   </footer>
 </div>
 
@@ -298,13 +362,14 @@ function nowStamp(){
   const d = new Date();
   return d.toTimeString().slice(0,8);
 }
+
 function pushLog(text, kind){
   state.log.unshift({ text, kind: kind || "info", time: nowStamp() });
   if(state.log.length > 60) state.log.pop();
   renderLog();
 }
 
-/* ---------------------------- secure wallet connection ---------------------------- */
+/* ---------------------------- secure wallet connection & profile management ---------------------------- */
 
 async function connectWallet() {
   if (typeof window.ethereum === 'undefined') {
@@ -324,36 +389,82 @@ async function connectWallet() {
     }
 
     const walletAddress = accounts[0];
-    const walletInput = document.getElementById("globalWalletAddress");
-    if(walletInput) walletInput.value = walletAddress;
-
-    if(btn) {
-      btn.textContent = walletAddress.slice(0, 6) + "..." + walletAddress.slice(-4);
-      btn.className = "btn px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-sm whitespace-nowrap";
-    }
-
+    updateWalletUI(walletAddress);
     pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
 
   } catch (err) {
     console.error("Wallet connection failed:", err);
     pushLog(`Wallet connection rejected or failed: ${err.message}`, "error");
-    const btn = document.getElementById("btnConnectWallet");
-    if(btn) btn.textContent = "Connect Wallet";
+    updateWalletUI(null);
   }
 }
+
+function disconnectWallet() {
+  updateWalletUI(null);
+  pushLog("Wallet disconnected.", "warn");
+}
+
+function updateWalletUI(walletAddress) {
+  const walletInput = document.getElementById("globalWalletAddress");
+  const container = document.getElementById("walletProfileContainer");
+  const dropdown = document.getElementById("accountDropdown");
+  
+  if(dropdown) dropdown.classList.add("hidden");
+
+  if(walletInput) walletInput.value = walletAddress || "";
+
+  if(!walletAddress) {
+    container.innerHTML = `
+      <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2">
+        <span>Connect Wallet</span>
+      </button>
+    `;
+    document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
+  } else {
+    const shortAddr = walletAddress.slice(0, 6) + "..." + walletAddress.slice(-4);
+    container.innerHTML = `
+      <button id="btnProfileTrigger" class="btn glow-green px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-sm whitespace-nowrap flex items-center gap-2.5">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+        <span class="font-mono text-xs">${shortAddr}</span>
+        <span class="text-[10px] text-slate-400">▼</span>
+      </button>
+    `;
+    document.getElementById("btnProfileTrigger")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+
+    const fullAddrEl = document.getElementById("dropdownFullAddress");
+    if(fullAddrEl) fullAddrEl.textContent = walletAddress;
+  }
+}
+
+// مدیریت کلیک خارج از منوی کشویی برای بسته شدن آن
+window.addEventListener("click", () => {
+  const dropdown = document.getElementById("accountDropdown");
+  if(dropdown && !dropdown.classList.contains("hidden")) {
+    dropdown.classList.add("hidden");
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
+  document.getElementById("btnDisconnectWallet")?.addEventListener("click", disconnectWallet);
+  document.getElementById("btnCopyAddress")?.addEventListener("click", () => {
+    const addr = document.getElementById("globalWalletAddress")?.value;
+    if(addr) {
+      navigator.clipboard.writeText(addr);
+      pushLog("Wallet address copied to clipboard.", "success");
+    }
+  });
+});
 
 if (typeof window.ethereum !== 'undefined') {
   window.ethereum.on('accountsChanged', (accounts) => {
     if (accounts.length === 0) {
-      pushLog("Wallet disconnected by user.", "warn");
-      document.getElementById("globalWalletAddress").value = "";
-      const btn = document.getElementById("btnConnectWallet");
-      if(btn) {
-        btn.textContent = "Connect Wallet";
-        btn.className = "btn glow-cyan px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap";
-      }
+      disconnectWallet();
     } else {
-      document.getElementById("globalWalletAddress").value = accounts[0];
+      updateWalletUI(accounts[0]);
       pushLog(`Active account switched to: ${accounts[0].slice(0, 6)}...`, "info");
     }
   });
@@ -388,7 +499,7 @@ async function createCase(){
 
     state.caseCreated = true;
     state.caseState = "DRAFT";
-    pushLog(`create_case success! TxHash: ${txHash.slice(0,10)}...`, "success");
+    pushLog(`create_case success! TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -422,7 +533,7 @@ async function fundCase(amountGEN){
 
     state.escrowBalance = amountGEN;
     state.caseState = "ACTIVE";
-    pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN.`, "success");
+    pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -457,7 +568,7 @@ async function submitDelivery(){
     });
 
     state.caseState = "SUBMITTED";
-    pushLog(`submit_delivery success! Evidence stored on-chain.`, "success");
+    pushLog(`submit_delivery success! Evidence stored on-chain. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -501,7 +612,7 @@ async function requestAdjudication(){
     state.caseState = verdict;
     state.isAdjudicating = false;
     state.consensus = { verdict, rate: 1.0 };
-    pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}`, "success");
+    pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -536,7 +647,7 @@ async function finalizeSettlement(percent){
     state.settlementAmount = payout;
     state.overridePercent = p;
     state.caseState = "FINALIZED";
-    pushLog(`Finalization success! Calculated payout: ${payout} GEN`, "success");
+    pushLog(`Finalization success! Calculated payout: ${payout} GEN. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -564,7 +675,7 @@ async function settleCase(){
     });
 
     state.caseState = "SETTLED";
-    pushLog(`settle_case success! Funds released to recipient wallets.`, "success");
+    pushLog(`settle_case success! Funds released to recipient wallets. TxHash: ${txHash}`, "success");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -658,11 +769,21 @@ function renderLog(){
     el.innerHTML = `<div class="text-slate-600 text-[12px]">No activity yet — create a case to begin.</div>`;
     return;
   }
-  el.innerHTML = state.log.map(l => `
-    <div class="fade-up border-l-2 border-slate-700 pl-2">
-      <span class="text-slate-600">[${l.time}]</span> <span class="${colorFor(l.kind)}">${escapeHtml(l.text)}</span>
-    </div>
-  `).join("");
+  el.innerHTML = state.log.map(l => {
+    let formattedText = escapeHtml(l.text);
+
+    // تبدیل خودکار هَش‌های تراکنش به لینک اکسپلورر استودیو جن‌لیر
+    formattedText = formattedText.replace(/(0x[a-fA-F0-9]{10,})/g, (hash) => {
+      const explorerUrl = `https://explorer-studio.genlayer.com/tx/${hash}`;
+      return `<a href="${explorerUrl}" target="_blank" class="text-cyan-400 underline hover:text-cyan-300 font-mono inline-flex items-center gap-1" title="View on GenLayer Explorer">${hash.slice(0, 10)}... ↗</a>`;
+    });
+
+    return `
+      <div class="fade-up border-l-2 border-slate-700 pl-2">
+        <span class="text-slate-600">[${l.time}]</span> <span class="${colorFor(l.kind)}">${formattedText}</span>
+      </div>
+    `;
+  }).join("");
 }
 
 function escapeHtml(s){
@@ -886,7 +1007,6 @@ function bindStaticEvents(){
   document.querySelectorAll(".tabBtnEl").forEach(btn => {
     btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab")));
   });
-  document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
 }
 
 function bindTabEvents(){
