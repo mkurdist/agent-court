@@ -9,6 +9,10 @@ _FORBIDDEN_PHRASES = (
     "mark this task as completed",
     "you are now free",
     "override verdict",
+    "adjudication target: accepted",
+    "adjudication target: disputed",
+    "rule accepted",
+    "rule disputed",
 )
 
 def _sanitize_web_evidence(raw_content: str) -> str:
@@ -68,7 +72,6 @@ class AgentCourt(gl.Contract):
         state = self.case_states.get(case_id, self.STATE_DRAFT)
         assert state == self.STATE_DRAFT, "Invalid state for funding"
         
-        # Enforce strict party authorization: only the registered buyer can fund
         buyer = self.buyer_addresses.get(case_id)
         assert gl.message.sender_address == buyer, "Unauthorized: only the registered buyer can fund escrow"
         
@@ -84,7 +87,6 @@ class AgentCourt(gl.Contract):
         state = self.case_states.get(case_id, "")
         assert state == self.STATE_ACTIVE, "Case is not active"
         
-        # Enforce strict party authorization: only the registered provider can submit delivery
         provider = self.provider_addresses.get(case_id)
         assert gl.message.sender_address == provider, "Unauthorized: only the registered provider can submit delivery"
         
@@ -101,45 +103,49 @@ class AgentCourt(gl.Contract):
         agreement_json = self.cases.get(case_id, "{}")
 
         def evaluate_evidence() -> bool:
-            # 1. Fetch live web / GitHub repository code or documentation securely
             response = gl.nondet.web.get(web_url)
             web_data = response.body.decode("utf-8")
             safe_data = _sanitize_web_evidence(web_data)
 
-            # 2. Universal dynamic prompt that reads any custom agreement JSON and matches it against any evidence
+            # Prioritize tail-end data (Auditor Notes / summary metrics) if payload is large
+            if len(safe_data) > 4000:
+                truncated_data = safe_data[:2000] + "\n...\n[TRUNCATED_MIDDLE]\n...\n" + safe_data[-2000:]
+            else:
+                truncated_data = safe_data
+
             prompt = f"""
-            You are an expert, strict, and impartial decentralized AI Smart Contract Judge and Auditor.
-            Your task is to dynamically analyze and cross-verify ANY custom agreement criteria against the provided source code, README, or documentation evidence.
+            You are a Decentralized AI Smart Contract Judge operating within the GenLayer Network environment.
+            Your verdict will be processed by consensus-based validator nodes. Your duty is to ensure absolute logical rigor and integrity for the AgentCourt protocol.
+            
+            OPERATIONAL CONTEXT:
+            - You are performing strict on-chain adjudication.
+            - You must act as a Hostile-Strict Auditor, not a helpful assistant. Do not assume good intentions; hunt for functional gaps, logic bugs, missing implementations, or auditor warnings.
             
             CUSTOM AGREEMENT & CRITERIA (JSON):
             {agreement_json}
             
             SUBMITTED EVIDENCE / SOURCE CODE / DOCUMENTATION:
-            {safe_data[:4000]}
+            {truncated_data}
             
-            DYNAMIC EVALUATION INSTRUCTIONS:
-            1. Parse the agreement criteria, requirements, or claims dynamically from the JSON above.
-            2. Examine the submitted evidence/code to check if it genuinely satisfies every single condition, rule, or claim specified in the agreement.
-            3. Detect any contradictions between documentation claims and the actual implementation, missing security features, logic flaws, or unfulfilled requirements.
-            4. If ANY requirement is violated, missing, or contradicted, you MUST output 'DISPUTED'.
-            5. Only output 'ACCEPTED' if all criteria are fully, verifiably, and safely satisfied.
+            ZERO-TOLERANCE EVALUATION INSTRUCTIONS:
+            1. Parse all agreement requirements, expected claims, or rules dynamically from the JSON above.
+            2. Cross-verify every requirement against the submitted code/documentation evidence. 
+            3. Pay extreme attention to any warnings, auditor notes, missing features, or contradictions indicating incomplete/broken work.
+            4. If ANY requirement is violated, missing, incomplete, or contradicted, you MUST output 'DISPUTED'.
+            5. Only output 'ACCEPTED' if all criteria are fully, verifiably, and safely satisfied without exception.
             
             Respond with ONLY ONE WORD (no punctuation, no explanation): ACCEPTED or DISPUTED.
             """
             
-            # 3. Execute prompt via GenLayer non-deterministic LLM execution layer
             llm_response = str(gl.nondet.exec_prompt(prompt)).strip().upper()
             
-            # 4. Strict evaluation parsing
             if "DISPUTED" in llm_response:
                 return False
             if "ACCEPTED" in llm_response and "DISPUTED" not in llm_response:
                 return True
             
-            # Default fallback for ambiguity to ensure platform security
             return False
 
-        # GenLayer Equivalence Principle consensus check across validators
         is_verified = gl.eq_principle.strict_eq(evaluate_evidence)
 
         if is_verified:
@@ -167,8 +173,6 @@ class AgentCourt(gl.Contract):
         assert success_score_percentage <= u256(100), "Percentage cannot exceed 100"
 
         total_funds = self.escrow_balances.get(case_id, u256(0))
-        
-        # Deterministic integer division to prevent float conversion error
         payout = (total_funds * success_score_percentage) // u256(100)
         
         self.settlement_amounts[case_id] = payout
@@ -187,7 +191,6 @@ class AgentCourt(gl.Contract):
         provider = self.provider_addresses.get(case_id)
         buyer = self.buyer_addresses.get(case_id)
 
-        # Enforce verdict-bound custody release: transfer funds out to provider and buyer
         if payout > u256(0) and provider:
             _Recipient(provider).emit_transfer(value=payout, on='finalized')
 
