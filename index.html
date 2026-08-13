@@ -18,59 +18,95 @@
 </script>
 <style>
   :root{ --bg-deep:#070b14; --bg-base:#0f172a; --panel:rgba(30,41,59,0.55); --panel-border:rgba(148,163,184,0.14); --cyan:#22d3ee; --violet:#8b5cf6; --amber:#fbbf24; --green:#34d399; --red:#f87171; --ink:#f1f5f9; --muted:#94a3b8; }
-  body{ background: radial-gradient(ellipse 900px 500px at 12% -10%, rgba(139,92,246,0.16), transparent 60%), radial-gradient(ellipse 900px 600px at 100% 0%, rgba(34,211,238,0.13), transparent 55%), radial-gradient(ellipse 700px 500px at 50% 110%, rgba(251,191,36,0.07), transparent 60%), var(--bg-deep); color:var(--ink); font-family:'Inter',sans-serif; min-height:100vh; }
-  .font-display{font-family:'Space Grotesk',sans-serif;}
-  .font-mono{font-family:'IBM Plex Mono',monospace;}
-  .glass{ background:var(--panel); border:1px solid var(--panel-border); backdrop-filter:blur(20px); }
+  body.light-mode{ --bg-deep:#f1f5f9; --bg-base:#e2e8f0; --panel:rgba(255,255,255,0.9); --panel-border:rgba(148,163,184,0.3); --ink:#0f172a; --muted:#334155; }
+  *{box-sizing:border-box;} html,body{margin:0;padding:0;}
+  body{ background: radial-gradient(ellipse 900px 500px at 12% -10%, rgba(139,92,246,0.16), transparent 60%), radial-gradient(ellipse 900px 600px at 100% 0%, rgba(34,211,238,0.13), transparent 55%), radial-gradient(ellipse 700px 500px at 50% 110%, rgba(251,191,36,0.07), transparent 60%), var(--bg-deep); color:var(--ink); font-family:'Inter',ui-sans-serif,system-ui,sans-serif; min-height:100vh; transition: background 0.3s ease, color 0.3s ease; }
+  .font-display{font-family:'Space Grotesk',ui-sans-serif,sans-serif;}
+  .font-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+  .glass{ background:var(--panel); border:1px solid var(--panel-border); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); }
   .glow-cyan{box-shadow:0 0 0 1px rgba(34,211,238,0.25), 0 0 40px -8px rgba(34,211,238,0.35);}
   .glow-violet{box-shadow:0 0 0 1px rgba(139,92,246,0.28), 0 0 40px -8px rgba(139,92,246,0.4);}
   .glow-amber{box-shadow:0 0 0 1px rgba(251,191,36,0.28), 0 0 40px -8px rgba(251,191,36,0.35);}
   .glow-green{box-shadow:0 0 0 1px rgba(52,211,153,0.28), 0 0 30px -8px rgba(52,211,153,0.4);}
   .text-gradient{ background:linear-gradient(90deg,#22d3ee,#8b5cf6 60%,#fbbf24); -webkit-background-clip:text;background-clip:text;color:transparent; }
-  .btn{ transition:transform .15s ease, box-shadow .15s ease; cursor:pointer; }
-  .btn:hover:not(:disabled){transform:translateY(-1px);}
-  .fade-up{animation:fadeUp .35s ease both;}
+  .btn{ font-family:'Space Grotesk',sans-serif; font-weight:600; letter-spacing:.01em; transition:transform .15s ease, box-shadow .15s ease, filter .15s ease; cursor:pointer; }
+  .btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.08);}
+  .tab-btn{transition:all .2s ease;}
+  input,textarea{ background:rgba(7,11,20,0.55); border:1px solid rgba(148,163,184,0.18); color:var(--ink); font-family:'IBM Plex Mono',monospace; font-size:13px; }
+  input:focus,textarea:focus{ outline:none; border-color:rgba(34,211,238,0.55); box-shadow:0 0 0 3px rgba(34,211,238,0.12); }
+  @keyframes pulseDot{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.85);}}
+  .pulse-dot{animation:pulseDot 1.4s ease-in-out infinite;}
   @keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
-  ::-webkit-scrollbar{width:8px;} ::-webkit-scrollbar-thumb{background:#334155;border-radius:8px;}
+  .fade-up{animation:fadeUp .35s ease both;}
 </style>
 </head>
 <body class="antialiased">
 
 <div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3 pointer-events-none"></div>
+
 <div id="globalOverlay" class="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex flex-col items-center justify-center hidden opacity-0 transition-opacity duration-300">
   <div class="glass p-6 rounded-2xl border border-cyan-500/30 glow-cyan flex flex-col items-center space-y-4 max-w-sm text-center">
     <div class="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-    <div class="font-display font-600 text-sm text-cyan-200" id="overlayTitle">Processing Action</div>
-    <div class="font-mono text-xs text-slate-400" id="overlayDesc">Waiting for consensus...</div>
+    <div class="font-display font-600 text-sm text-cyan-200" id="overlayTitle">Processing On-Chain Action</div>
+    <div class="font-mono text-xs text-slate-400 leading-relaxed" id="overlayDesc">Waiting for GenLayer network validators consensus & transaction finality...</div>
   </div>
 </div>
 
-<div class="max-w-[1400px] mx-auto px-4 py-6">
-  <header class="flex justify-between items-center mb-6">
-    <div>
-      <h1 class="font-display text-2xl font-700"><span class="text-gradient">AgentCourt</span> Protocol</h1>
-      <p class="text-[13px] text-slate-400">Trustless dispute resolution via GenLayer network</p>
+<div class="max-w-[1400px] mx-auto px-4 md:px-8 py-6">
+  <header class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+    <div class="flex items-center gap-4">
+      <div class="relative w-12 h-12 shrink-0">
+        <svg viewBox="0 0 48 48" class="w-12 h-12">
+          <circle cx="24" cy="24" r="22" fill="url(#logoGrad)" opacity="0.15"/>
+          <path d="M24 6 L24 42 M12 14 L36 14 M8 20 L16 20 M32 20 L40 20" stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round"/>
+          <defs><linearGradient id="logoGrad"><stop offset="0%" stop-color="#22d3ee"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs>
+        </svg>
+      </div>
+      <div>
+        <h1 class="font-display text-2xl font-700 leading-none">
+          <span class="text-gradient">AgentCourt</span> <span class="text-slate-100">Protocol</span>
+        </h1>
+        <p class="text-[13px] text-slate-400 mt-1">Trustless dispute resolution & settlement for autonomous agents</p>
+      </div>
     </div>
-    <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 text-cyan-200 text-sm">Connect Wallet</button>
+    
+    <div class="flex items-center gap-3">
+      <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+        <span class="font-mono text-xs text-slate-300">GenLayer Network</span>
+      </div>
+      <button id="btnThemeToggle" class="btn glass px-3.5 py-2.5 rounded-xl text-slate-300 text-sm">🌙 Dark</button>
+      <div class="relative">
+        <div id="walletProfileContainer">
+          <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm">Connect Wallet</button>
+        </div>
+      </div>
+    </div>
   </header>
 
   <div class="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-6">
     <div class="space-y-6">
       <div class="glass rounded-2xl p-1.5 flex gap-1.5">
-        <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm">🏛️ Buyer</button>
-        <button data-tab="provider" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm">⚙️ Provider</button>
-        <button data-tab="court" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm">⚖️ Court & Appeal</button>
+        <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">🏛️ Buyer</button>
+        <button data-tab="provider" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">⚙️ Provider</button>
+        <button data-tab="court" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">⚖️ Court & Appeal</button>
+        <button data-tab="history" class="tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600">📜 History</button>
       </div>
       <div id="tabContent"></div>
     </div>
+
     <div class="space-y-6">
       <div class="glass rounded-2xl p-5 glow-violet">
-        <h3 class="font-display text-sm mb-3">Live Verdict Scale</h3>
+        <h3 class="font-display text-sm font-600 text-slate-200 mb-3">Live Verdict Scale</h3>
         <div id="scaleSvgHolder" class="flex justify-center"></div>
       </div>
       <div class="glass rounded-2xl p-5">
-        <h3 class="font-display text-sm mb-3">Case Summary</h3>
+        <h3 class="font-display text-sm font-600 text-slate-200 mb-3">Case Summary</h3>
         <div id="caseSummary" class="space-y-2 text-[13px] font-mono"></div>
+      </div>
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-display text-sm font-600 text-slate-200 mb-3">Chain Activity</h3>
+        <div id="activityLog" class="space-y-2 max-h-[340px] overflow-y-auto pr-1 text-[12px] font-mono"></div>
       </div>
     </div>
   </div>
@@ -90,14 +126,13 @@ let state = {
   evidence: { githubUrl:"", apiUrl:"", notes:"" },
   consensus: null,
   isAdjudicating: false,
+  settlementAmount: null,
+  appealJustification: "",
+  caseHistory: [],
   log: []
 };
 
-function getRequirementStatus(reqId) {
-    if (!state.consensus) return { label: "Pending", cls: "text-slate-400" };
-    if (state.consensus.verdict === "DISPUTED") return { label: "✕ Failed", cls: "text-red-400" };
-    return { label: "✓ Verified", cls: "text-emerald-400" };
-}
+// --- CORE RENDER FUNCTIONS ---
 
 function renderCourtTab(){
   const canAdjudicate = state.caseState === "SUBMITTED";
@@ -106,42 +141,49 @@ function renderCourtTab(){
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
       <div class="flex items-center justify-between">
-        <div>
-          <h2 class="font-display text-lg font-600">AI Adjudication</h2>
-        </div>
+        <h2 class="font-display text-lg font-600">AI Adjudication</h2>
         <button id="btnAdjudicate" ${(!canAdjudicate || state.isAdjudicating)?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
           ${state.isAdjudicating ? "Running AI Audit..." : "Request AI Adjudication"}
         </button>
       </div>
-
       ${state.consensus ? `
         <div class="p-4 rounded-xl border ${isDisputed ? 'border-red-500/40 bg-red-500/10' : 'border-emerald-500/40 bg-emerald-500/10'}">
-          <div class="text-sm font-mono text-slate-400 mb-1">Final Verdict</div>
+          <div class="text-sm font-mono text-slate-400">Verdict</div>
           <div class="text-2xl font-700 ${isDisputed ? 'text-red-300' : 'text-emerald-300'}">${state.consensus.verdict}</div>
         </div>
-
         <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
-          <div class="text-xs font-mono uppercase text-slate-300">Audit Breakdown</div>
-          ${[{id:'R1', desc:'API Endpoints'},{id:'R2', desc:'Authentication'},{id:'R3', desc:'Tests'},{id:'R4', desc:'Docs'},{id:'R5', desc:'Connectivity'}].map(r => {
-              const status = getRequirementStatus(r.id);
-              return `<div class="flex justify-between bg-slate-900/40 p-2 rounded border border-slate-800">
-                        <span class="text-slate-300">${r.id}: ${r.desc}</span>
-                        <span class="${status.cls}">${status.label}</span>
-                      </div>`;
-          }).join("")}
+          ${[{id:'R1', desc:'API Endpoints'},{id:'R2', desc:'Authentication'},{id:'R3', desc:'Tests'},{id:'R4', desc:'Docs'},{id:'R5', desc:'Connectivity'}].map(r => `
+            <div class="flex justify-between bg-slate-900/40 p-2 rounded border border-slate-800">
+              <span class="text-slate-300">${r.id}: ${r.desc}</span>
+              <span class="${isDisputed ? 'text-red-400' : 'text-emerald-400'}">${isDisputed ? '✕ Failed' : '✓ Verified'}</span>
+            </div>`).join("")}
         </div>
       ` : ''}
     </div>
   `;
 }
 
-// توابع دیگر (createCase, fundCase, submitDelivery, requestAdjudication) همانند نسخه قبلی...
-// جهت کوتاه شدن پاسخ، توابع منطقی در اینجا تکرار نشدند اما در فایل نهایی شما وجود دارند.
-
-function renderAll(){
-  renderCourtTab(); 
-  // سایر توابع رندر...
+function renderBuyerTab(){
+  return `<div class="glass rounded-2xl p-6">Buyer Controls - Create Case...</div>`;
 }
+
+function renderProviderTab(){
+  return `<div class="glass rounded-2xl p-6">Provider Controls - Submit Evidence...</div>`;
+}
+
+function renderHistoryTab(){
+  return `<div class="glass rounded-2xl p-6">History Log...</div>`;
+}
+
+function renderAll() {
+  const el = document.getElementById("tabContent");
+  if(state.activeTab === "buyer") el.innerHTML = renderBuyerTab();
+  else if(state.activeTab === "provider") el.innerHTML = renderProviderTab();
+  else if(state.activeTab === "court") el.innerHTML = renderCourtTab();
+  else if(state.activeTab === "history") el.innerHTML = renderHistoryTab();
+}
+
+renderAll();
 </script>
 </body>
 </html>
