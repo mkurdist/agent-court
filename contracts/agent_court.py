@@ -93,7 +93,7 @@ class AgentCourt(gl.Contract):
 
     @gl.public.write
     def request_adjudication(self, case_id: str, web_url: str) -> str:
-        """Non-deterministic web evidence fetch + Real Professional AI Adjudication via GenLayer LLM."""
+        """Non-deterministic web evidence fetch + Adversarial AI Adjudication via GenLayer LLM."""
         state = self.case_states.get(case_id, "")
         assert state == self.STATE_SUBMITTED, "Case must be submitted for adjudication"
         self.case_states[case_id] = self.STATE_ADJUDICATING
@@ -106,10 +106,10 @@ class AgentCourt(gl.Contract):
             web_data = response.body.decode("utf-8")
             safe_data = _sanitize_web_evidence(web_data)
 
-            # 2. Construct strict auditor prompt for decentralized LLM validators
+            # 2. Construct strict adversarial auditor prompt for decentralized LLM validators
             prompt = f"""
-            You are a strict, objective decentralized AI Smart Contract Auditor and Judge.
-            Analyze the agreement requirements and the provided source code or documentation evidence below.
+            You are an ultra-strict, adversarial AI Smart Contract Auditor and Judge.
+            Your objective is to find ANY security risk, logic flaw, missing feature, or contradiction between documentation claims and the actual source code.
             
             AGREEMENT REQUIREMENTS / CRITERIA:
             {agreement_json}
@@ -118,19 +118,24 @@ class AgentCourt(gl.Contract):
             {safe_data[:3500]}
             
             INSTRUCTIONS:
-            - Perform a thorough security and logic audit.
-            - Check for hidden logic bugs, unhandled exceptions, race conditions, or contradictions between README claims and actual code.
-            - If any critical flaws, security risks, or contract breaches are detected, output 'DISPUTED'.
-            - If the code genuinely and safely fulfills the requirements, output 'ACCEPTED'.
+            - Scrutinize the evidence carefully against the criteria.
+            - If there are any security vulnerabilities, missing implementations, unhandled risks, or contradictions between claims and actual code, you MUST output 'DISPUTED'.
+            - Only output 'ACCEPTED' if the code completely and safely fulfills all criteria without exceptions.
             
-            Respond with ONLY ONE WORD (no extra text): ACCEPTED or DISPUTED.
+            Respond with ONLY ONE WORD (no extra text or explanation): ACCEPTED or DISPUTED.
             """
             
             # 3. Execute prompt via GenLayer non-deterministic LLM execution layer
             llm_response = str(gl.nondet.exec_prompt(prompt)).strip().upper()
             
-            # Returns True if ACCEPTED, False if DISPUTED
-            return "ACCEPTED" in llm_response and "DISPUTED" not in llm_response
+            # 4. Strict and safe parsing logic to prevent false positives
+            if "DISPUTED" in llm_response:
+                return False
+            if "ACCEPTED" in llm_response and "DISPUTED" not in llm_response:
+                return True
+            
+            # Default to False (Disputed) if the LLM output is ambiguous
+            return False
 
         # GenLayer Equivalence Principle consensus check across validators
         is_verified = gl.eq_principle.strict_eq(evaluate_evidence)
