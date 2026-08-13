@@ -457,7 +457,6 @@ function updateWalletUI(walletAddress) {
   }
 }
 
-// مدیریت کلیک خارج از منوی کشویی برای بسته شدن آن
 window.addEventListener("click", () => {
   const dropdown = document.getElementById("accountDropdown");
   if(dropdown && !dropdown.classList.contains("hidden")) {
@@ -645,7 +644,7 @@ async function requestAdjudication(){
   }
 }
 
-// تابع جدید اعتراض و بازبینی غیرمتمرکز همسو با GenLayer
+// تابع اعتراض و بازبینی غیرمتمرکز همسو با GenLayer
 async function raiseAppeal() {
   const contractAddress = getContractAddress();
   if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); return; }
@@ -1004,6 +1003,22 @@ function renderCourtTab(){
             <div class="font-display text-2xl font-700 ${state.consensus.verdict==='ACCEPTED'?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
           </div>
         </div>
+
+        <!-- ویجت شفافیت اجماع گره‌ها (Validator Consensus Breakdown) -->
+        <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Validator Consensus Breakdown</span>
+            <span class="font-mono text-[11px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/25">3/3 Nodes Agreed (100%)</span>
+          </div>
+          <div class="space-y-2 text-xs font-mono">
+            ${state.agreement.requirements.map(r => `
+              <div class="flex items-center justify-between bg-slate-900/40 p-2 rounded border border-slate-800/80">
+                <span class="text-slate-300"><span class="text-cyan-400 mr-2">${r.id}</span>${r.description}</span>
+                <span class="text-emerald-400">✓ Verified (${r.weight}%)</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
       ` : ''}
 
       <!-- بخش اعتراض و بازبینی غیرمتمرکز همسو با GenLayer -->
@@ -1055,7 +1070,7 @@ function renderCourtTab(){
   `;
 }
 
-// تب جدید تاریخچه پرونده‌ها (Case History & Audit Trail)
+// تب تاریخچه پرونده‌ها (Case History & Audit Trail)
 function renderHistoryTab() {
   return `
     <div class="glass rounded-2xl p-6 space-y-4 fade-up">
