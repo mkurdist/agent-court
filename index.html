@@ -4,10 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>AgentCourt Protocol — Dispute Resolution & Settlement</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><circle cx='24' cy='24' r='22' fill='%2322d3ee' opacity='0.2'/><path d='M24 6 L24 42 M12 14 L36 14 M8 20 L16 20 M32 20 L40 20' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<!-- بارگذاری کتابخانه رسمی GenLayer JS SDK از طریق CDN یا پکیج‌های سازگار -->
+<!-- Load official GenLayer JS SDK library via CDN or compatible packages -->
 <script type="importmap">
   {
     "imports": {
@@ -188,7 +189,7 @@
       </div>
     </div>
     
-    <!-- پروفایل کاربری هدر و وضعیت شبکه -->
+    <!-- Header user profile and network status -->
     <div class="flex items-center gap-3 self-start lg:self-auto flex-wrap">
       <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
         <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
@@ -197,13 +198,13 @@
         <span class="font-mono text-xs text-amber-300">≥ 66%</span>
       </div>
 
-      <!-- دکمه تغییر تم روز و شب (Theme Toggle) -->
+      <!-- Day and night theme toggle button -->
       <button id="btnThemeToggle" class="btn glass px-3.5 py-2.5 rounded-xl text-slate-300 text-sm whitespace-nowrap flex items-center gap-2 border border-slate-700/60 hover:text-cyan-300 transition-colors">
         <span id="themeIcon">🌙</span>
         <span class="font-mono text-xs" id="themeText">Dark</span>
       </button>
 
-      <!-- پروفایل و دکمه اتصال / منوی اکانت -->
+      <!-- Account management dropdown menu -->
       <div class="relative">
         <div id="walletProfileContainer">
           <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2">
@@ -211,7 +212,7 @@
           </button>
         </div>
 
-        <!-- منوی کشویی مدیریت اکانت (Dropdown) -->
+        <!-- Account dropdown menu -->
         <div id="accountDropdown" class="hidden absolute right-0 mt-2 w-72 glass rounded-2xl p-4 shadow-2xl border border-slate-700/80 z-50 fade-up">
           <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
             <span class="font-mono text-xs text-slate-400">Connected Account</span>
@@ -286,7 +287,7 @@
     <!-- LEFT: main workflow panel -->
     <div class="space-y-6">
 
-      <!-- Tabs (شامل تب جدید History) -->
+      <!-- Tabs (including new History tab) -->
       <div class="glass rounded-2xl p-1.5 flex gap-1.5 flex-wrap">
         <button data-tab="buyer" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">🏛️ Buyer</button>
         <button data-tab="provider" class="tabBtnEl tab-btn flex-1 min-w-[90px] py-2.5 rounded-xl font-display text-sm font-600">⚙️ Provider</button>
@@ -553,7 +554,7 @@ function updateWorkflowStepper() {
 async function connectWallet() {
   if (typeof window.ethereum === 'undefined') {
     pushLog("Wallet error: No Web3 wallet detected (MetaMask or Rabby required).", "error");
-    showToast("لطفاً یک کیف پول وب۳ روی مرورگر خود نصب کنید.", "error");
+    showToast("Please install a Web3 wallet in your browser.", "error");
     return;
   }
 
@@ -831,12 +832,12 @@ async function requestAdjudication(){
   }
 }
 
-// تابع اعتراض و بازبینی غیرمتمرکز همسو با GenLayer
+// Decentralized appeal and review function aligned with GenLayer
 async function raiseAppeal() {
   const contractAddress = getContractAddress();
   if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
   if(!state.appealJustification.trim()) {
-    alert("لطفاً دلیل اعتراض یا مستندات تکمیلی را وارد کنید.");
+    alert("Please enter the appeal justification or supplementary documentation.");
     return;
   }
 
@@ -1031,7 +1032,7 @@ function renderLog(){
   el.innerHTML = state.log.map(l => {
     let formattedText = escapeHtml(l.text);
 
-    // تبدیل خودکار هَش‌های تراکنش به لینک اکسپلورر استودیو جن‌لیر
+    // Auto-convert transaction hashes to GenLayer Studio explorer links
     formattedText = formattedText.replace(/(0x[a-fA-F0-9]{10,})/g, (hash) => {
       const explorerUrl = `https://explorer-studio.genlayer.com/tx/${hash}`;
       return `<a href="${explorerUrl}" target="_blank" class="text-cyan-400 underline hover:text-cyan-300 font-mono inline-flex items-center gap-1" title="View on GenLayer Explorer">${hash.slice(0, 10)}... ↗</a>`;
@@ -1207,7 +1208,7 @@ function renderCourtTab(){
           </div>
         </div>
 
-        <!-- ویجت شفافیت اجماع گره‌ها (Validator Consensus Breakdown) -->
+        <!-- Validator Consensus Breakdown Widget -->
         <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
           <div class="flex items-center justify-between">
             <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Validator Consensus Breakdown</span>
@@ -1224,7 +1225,7 @@ function renderCourtTab(){
         </div>
       ` : ''}
 
-      <!-- بخش اعتراض و بازبینی غیرمتمرکز همسو با GenLayer -->
+      <!-- Decentralized appeal and review section aligned with GenLayer -->
       ${isDisputed ? `
         <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
           <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Dispute Detected — Request Validator Re-consensus</h3>
@@ -1273,7 +1274,7 @@ function renderCourtTab(){
   `;
 }
 
-// تب تاریخچه پرونده‌ها (Case History & Audit Trail)
+// Case History & Audit Trail tab
 function renderHistoryTab() {
   return `
     <div class="glass rounded-2xl p-6 space-y-4 fade-up">
