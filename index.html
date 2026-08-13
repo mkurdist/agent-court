@@ -31,12 +31,12 @@
     --muted:#94a3b8;
   }
   body.light-mode{
-    --bg-deep:#f8fafc;
-    --bg-base:#f1f5f9;
-    --panel:rgba(255,255,255,0.85);
-    --panel-border:rgba(148,163,184,0.25);
+    --bg-deep:#f1f5f9;
+    --bg-base:#e2e8f0;
+    --panel:rgba(255,255,255,0.9);
+    --panel-border:rgba(148,163,184,0.3);
     --ink:#0f172a;
-    --muted:#64748b;
+    --muted:#334155;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -58,6 +58,13 @@
       radial-gradient(ellipse 700px 500px at 50% 110%, rgba(251,191,36,0.04), transparent 60%),
       var(--bg-deep);
   }
+  body.light-mode .text-slate-400 { color: #334155 !important; }
+  body.light-mode .text-slate-500 { color: #475569 !important; }
+  body.light-mode .text-slate-300 { color: #1e293b !important; }
+  body.light-mode .bg-slate-900\/40 { background-color: rgba(241,245,249,0.8) !important; }
+  body.light-mode .bg-slate-800 { background-color: #cbd5e1 !important; color: #1e293b !important; }
+  body.light-mode .border-slate-700 { border-color: #cbd5e1 !important; }
+  
   .font-display{font-family:'Space Grotesk',ui-sans-serif,sans-serif;}
   .font-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
   .glass{
@@ -93,8 +100,8 @@
     font-size:13px;
   }
   body.light-mode input, body.light-mode textarea{
-    background:rgba(255,255,255,0.9);
-    border:1px solid rgba(148,163,184,0.3);
+    background:rgba(255,255,255,0.95);
+    border:1px solid rgba(148,163,184,0.4);
     color:#0f172a;
   }
   input:focus,textarea:focus{
