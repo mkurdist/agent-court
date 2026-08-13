@@ -401,11 +401,10 @@ const DEFAULT_AGREEMENT = {
   payment: "500 GEN",
   deadline: 1788000000,
   requirements: [
-    { id:"R1", description:"Five API endpoints exist", weight:25 },
-    { id:"R2", description:"Authentication works", weight:20 },
-    { id:"R3", description:"Tests pass", weight:25 },
-    { id:"R4", description:"Documentation exists", weight:15 },
-    { id:"R5", description:"API is reachable", weight:15 },
+    { id: "R1", description: "OAuth2 Authentication mandatory for all API routes", weight: 25 },
+    { id: "R2", description: "Rate Limiting implemented against DoS attacks", weight: 25 },
+    { id: "R3", description: "AES-256 Encryption applied to all stored sensitive data", weight: 25 },
+    { id: "R4", description: "Input Sanitization fully protects against SQL Injection", weight: 25 }
   ]
 };
 
