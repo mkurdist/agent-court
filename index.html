@@ -228,11 +228,14 @@
     </div>
   </header>
 
-  <div class="glass rounded-2xl px-6 py-4 mb-6">
+  <div class="glass rounded-2xl px-6 py-4 mb-6 flex items-center justify-between flex-wrap gap-3">
     <div>
-      <label class="text-xs text-slate-400 block mb-1">Smart Contract Address</label>
-      <input id="globalContractAddress" value="0xC0A2EbEfA1df7D2a2Ed97EBe3d9E1d4886A52c80" class="w-full rounded-lg px-3 py-2" />
+      <span class="text-xs text-slate-400 block mb-1">Smart Contract Address (Registry Auto-Synced)</span>
+      <span id="displayContractAddress" class="font-mono text-xs text-cyan-300">Syncing...</span>
     </div>
+    <span class="font-mono text-[11px] px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Auto-Synced
+    </span>
   </div>
 
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
@@ -349,16 +352,37 @@
 import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
+// The Registry contract address is fixed to automatically fetch the latest AgentCourt instance
+const FIXED_REGISTRY_ADDRESS = "0x42Cf94434cBb800654cf9D4eb1048B48acfA0Ff8";
+let cachedCourtAddress = "";
+
+async function getContractAddress() {
+  if (cachedCourtAddress) return cachedCourtAddress;
+  try {
+    const client = createClient({ chain: studionet });
+    const activeAddress = await client.readContract({
+      address: FIXED_REGISTRY_ADDRESS,
+      functionName: "get_court_address",
+      args: [],
+    });
+    if (activeAddress) {
+      cachedCourtAddress = String(activeAddress).trim();
+      const displayEl = document.getElementById("displayContractAddress");
+      if (displayEl) displayEl.textContent = cachedCourtAddress;
+      return cachedCourtAddress;
+    }
+  } catch (err) {
+    console.warn("Registry sync failed, using fallback.", err);
+  }
+  return "0xebebaB69597F8E9E8D4DFE2eb0Fa055f47355966";
+}
+
 function getClient() {
   const walletAddr = state.buyerAddress ? state.buyerAddress.trim() : undefined;
   return createClient({
     chain: studionet,
     account: walletAddr ? walletAddr : undefined,
   });
-}
-
-function getContractAddress() {
-  return document.getElementById("globalContractAddress")?.value.trim();
 }
 
 const STATE_FLOW = ["DRAFT","ACTIVE","SUBMITTED","ADJUDICATING","ACCEPTED_DISPUTED","APPEALED","FINALIZED","SETTLED"];
@@ -539,22 +563,15 @@ async function connectWallet() {
     showToast("Please install a Web3 wallet in your browser.", "error");
     return;
   }
-
   try {
     const btn = document.getElementById("btnConnectWallet");
     if(btn) btn.textContent = "Connecting...";
-
     const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    
-    if (!accounts || accounts.length === 0) {
-      throw new Error("No accounts found");
-    }
-
+    if (!accounts || accounts.length === 0) throw new Error("No accounts found");
     const walletAddress = accounts[0];
     updateWalletUI(walletAddress);
     pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
     showToast("Wallet connected successfully!");
-
   } catch (err) {
     console.error("Wallet connection failed:", err);
     pushLog(`Wallet connection rejected or failed: ${err.message}`, "error");
@@ -572,97 +589,41 @@ function disconnectWallet() {
 function updateWalletUI(walletAddress) {
   const container = document.getElementById("walletProfileContainer");
   const dropdown = document.getElementById("accountDropdown");
-  
   if(dropdown) dropdown.classList.add("hidden");
-
-  // Save active wallet into hidden global state representation
   state.buyerAddress = walletAddress || "";
-
   if(!walletAddress) {
-    container.innerHTML = `
-      <button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2">
-        <span>Connect Wallet</span>
-      </button>
-    `;
+    container.innerHTML = `<button id="btnConnectWallet" class="btn glow-cyan px-4 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-sm whitespace-nowrap flex items-center gap-2"><span>Connect Wallet</span></button>`;
     document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
   } else {
     const shortAddr = walletAddress.slice(0, 6) + "..." + walletAddress.slice(-4);
-    container.innerHTML = `
-      <button id="btnProfileTrigger" class="btn glow-green px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-sm whitespace-nowrap flex items-center gap-2.5">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
-        <span class="font-mono text-xs">${shortAddr}</span>
-        <span class="text-[10px] text-slate-400">▼</span>
-      </button>
-    `;
-    document.getElementById("btnProfileTrigger")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      dropdown.classList.toggle("hidden");
-    });
-
-    const fullAddrEl = document.getElementById("dropdownFullAddress");
-    if(fullAddrEl) fullAddrEl.textContent = walletAddress;
+    container.innerHTML = `<button id="btnProfileTrigger" class="btn glow-green px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-sm whitespace-nowrap flex items-center gap-2.5"><span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span><span class="font-mono text-xs">${shortAddr}</span><span class="text-[10px] text-slate-400">▼</span></button>`;
+    document.getElementById("btnProfileTrigger")?.addEventListener("click", (e) => { e.stopPropagation(); dropdown.classList.toggle("hidden"); });
+    document.getElementById("dropdownFullAddress").textContent = walletAddress;
   }
 }
 
-window.addEventListener("click", () => {
-  const dropdown = document.getElementById("accountDropdown");
-  if(dropdown && !dropdown.classList.contains("hidden")) {
-    dropdown.classList.add("hidden");
-  }
-});
-
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btnConnectWallet")?.addEventListener("click", connectWallet);
   document.getElementById("btnDisconnectWallet")?.addEventListener("click", disconnectWallet);
   document.getElementById("btnThemeToggle")?.addEventListener("click", toggleTheme);
   document.getElementById("btnCopyAddress")?.addEventListener("click", () => {
     const addr = state.buyerAddress;
-    if(addr) {
-      navigator.clipboard.writeText(addr);
-      pushLog("Wallet address copied to clipboard.", "success");
-      showToast("Address copied to clipboard!");
-    }
+    if(addr) { navigator.clipboard.writeText(addr); pushLog("Wallet address copied to clipboard.", "success"); showToast("Address copied to clipboard!"); }
   });
+  await getContractAddress();
+  renderAll();
 });
 
-if (typeof window.ethereum !== 'undefined') {
-  window.ethereum.on('accountsChanged', (accounts) => {
-    if (accounts.length === 0) {
-      disconnectWallet();
-    } else {
-      updateWalletUI(accounts[0]);
-      pushLog(`Active account switched to: ${accounts[0].slice(0, 6)}...`, "info");
-      showToast("Wallet account switched.");
-    }
-  });
-
-  window.ethereum.on('chainChanged', (_chainId) => {
-    window.location.reload();
-  });
-}
-
 async function createCase(){
-  const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("create_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.caseId || !state.caseId.trim()){ pushLog("create_case() error: case_id is required", "error"); showToast("Case ID is required", "error"); return; }
-  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("create_case() error: provider address is required", "error"); showToast("Provider address is required", "error"); return; }
-  
+  const contractAddress = await getContractAddress();
+  if(!contractAddress){ showToast("Contract Address could not be resolved", "error"); return; }
+  if(!state.caseId || !state.caseId.trim()){ showToast("Case ID is required", "error"); return; }
+  if(!state.providerAddress || !state.providerAddress.trim()){ showToast("Provider address is required", "error"); return; }
   try {
     showLoadingOverlay("Creating Case On-Chain", `Registering case "${state.caseId}" in GenLayer Intelligent Contract...`);
     const client = getClient();
-    pushLog(`Sending on-chain transaction: create_case("${state.caseId}")...`, "info");
-    
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "create_case",
-      args: [state.caseId, JSON.stringify(state.agreement), state.providerAddress],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
-
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "create_case", args: [state.caseId, JSON.stringify(state.agreement), state.providerAddress] });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
     state.caseCreated = true;
     state.caseState = "DRAFT";
     saveCaseToHistory();
@@ -673,310 +634,142 @@ async function createCase(){
   } catch(err) {
     console.error(err);
     hideLoadingOverlay();
-    pushLog(`create_case failed: ${err.message}`, "error");
     showToast(`Transaction failed: ${err.message}`, "error");
   }
 }
 
 async function fundCase(amountGEN){
-  const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("fund_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.caseCreated){ pushLog("fund_case() error: create the case first", "error"); showToast("Create the case first", "error"); return; }
-  if(state.caseState !== "DRAFT"){ pushLog("fund_case() error: invalid state for funding", "error"); showToast("Invalid state for funding", "error"); return; }
-  if(!amountGEN || isNaN(amountGEN) || amountGEN <= 0){ pushLog("fund_case() error: amount must be > 0", "error"); showToast("Amount must be > 0", "error"); return; }
-
+  const contractAddress = await getContractAddress();
   try {
-    showLoadingOverlay("Locking Escrow Funds", `Transferring ${amountGEN} GEN into payable escrow on GenLayer...`);
+    showLoadingOverlay("Locking Escrow Funds", `Transferring ${amountGEN} GEN into payable escrow...`);
     const client = getClient();
     const amountWei = BigInt(amountGEN) * 10n ** 18n; 
-    pushLog(`Locking ${amountGEN} GEN into payable escrow on-chain...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "fund_case",
-      args: [state.caseId],
-      value: amountWei, 
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
-
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "fund_case", args: [state.caseId], value: amountWei });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
     state.escrowBalance = amountGEN;
     state.caseState = "ACTIVE";
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN. TxHash: ${txHash}`, "success");
-    showToast(`Escrow funded with ${amountGEN} GEN successfully!`);
+    showToast(`Escrow funded with ${amountGEN} GEN!`);
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`fund_case failed: ${err.message}`, "error");
     showToast(`Escrow funding failed: ${err.message}`, "error");
   }
 }
 
 async function submitDelivery(){
-  const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("submit_delivery() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() error: case is not ACTIVE", "error"); showToast("Case is not ACTIVE", "error"); return; }
-  
-  const connectedWallet = state.buyerAddress.trim().toLowerCase();
-  if (connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) {
-    pushLog(`submit_delivery() error: Connected wallet is not the registered provider`, "error");
-    showToast("Error: You must switch to the Provider wallet address to submit delivery!", "error");
-    return;
-  }
-
-  const evidencePackage = JSON.stringify({
-    githubUrl: state.evidence.githubUrl,
-    apiUrl: state.evidence.apiUrl,
-    notes: state.evidence.notes
-  });
-
+  const contractAddress = await getContractAddress();
+  const evidencePackage = JSON.stringify({ githubUrl: state.evidence.githubUrl, apiUrl: state.evidence.apiUrl, notes: state.evidence.notes });
   try {
-    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence package on-chain...");
+    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence on-chain...");
     const client = getClient();
-    pushLog(`Submitting delivery evidence package on-chain...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "submit_delivery",
-      args: [state.caseId, evidencePackage],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
-
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "submit_delivery", args: [state.caseId, evidencePackage] });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
     state.caseState = "SUBMITTED";
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`submit_delivery success! Evidence stored on-chain. TxHash: ${txHash}`, "success");
-    showToast("Delivery evidence submitted on-chain!");
+    showToast("Delivery evidence submitted!");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`submit_delivery failed: ${err.message}`, "error");
     showToast(`Submission failed: ${err.message}`, "error");
   }
 }
 
 async function connectToExistingCase() {
-  const contractAddress = getContractAddress();
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim() : "";
-  
-  if(!contractAddress) { showToast("Contract Address is missing", "error"); return; }
-  if(!connectedWallet) { showToast("Please connect your Web3 wallet first!", "error"); return; }
-
-  try {
-    showLoadingOverlay("Syncing Case", `Syncing case with connected wallet: ${connectedWallet.slice(0,6)}...`);
-    const client = getClient();
-    
-    // تنظیم آدرس پروایدر به صورت خودکار بر اساس ولت متصل شده
-    state.providerAddress = connectedWallet;
-    state.caseCreated = true;
-    state.caseState = "ACTIVE"; 
-    
-    hideLoadingOverlay();
-    pushLog(`Successfully connected and synced case for provider: ${connectedWallet.slice(0,6)}...`, "success");
-    showToast("Connected to case successfully!");
-    
-    // هدایت خودکار به تب پروایدر
-    state.activeTab = "provider";
-    renderAll();
-  } catch(err) {
-    console.error(err);
-    hideLoadingOverlay();
-    pushLog(`Failed to connect to case: ${err.message}`, "error");
-    showToast(`Connection failed: ${err.message}`, "error");
-  }
+  if(!connectedWallet) { showToast("Connect your wallet first!", "error"); return; }
+  state.providerAddress = connectedWallet;
+  state.caseCreated = true;
+  state.caseState = "ACTIVE"; 
+  state.activeTab = "provider";
+  renderAll();
 }
 
 async function requestAdjudication(){
-  const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() error: case must be SUBMITTED", "error"); showToast("Case must be SUBMITTED", "error"); return; }
+  const contractAddress = await getContractAddress();
   if(state.isAdjudicating) return;
-
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
-  showLoadingOverlay("AI Adjudication in Progress", "Executing non-deterministic LLM nodes & waiting for GenLayer validator consensus...");
-  pushLog(`Requesting AI adjudication & GenLayer validator consensus on-chain...`, "info");
-
+  showLoadingOverlay("AI Adjudication in Progress", "Executing GenLayer validator consensus...");
   try {
     const client = getClient();
-    const targetUrl = state.evidence.githubUrl || "https://github.com";
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "request_adjudication",
-      args: [state.caseId, targetUrl],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
-
-    const verdictResult = await client.readContract({
-      address: contractAddress,
-      functionName: "get_adjudication_result",
-      args: [state.caseId],
-    });
-
-    const verdict = String(verdictResult || "ACCEPTED");
-    state.caseState = verdict;
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, state.evidence.githubUrl || "https://github.com"] });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const verdictResult = await client.readContract({ address: contractAddress, functionName: "get_adjudication_result", args: [state.caseId] });
+    state.caseState = String(verdictResult || "ACCEPTED");
     state.isAdjudicating = false;
-    state.consensus = { verdict, rate: 1.0 };
-    saveCaseToHistory();
+    state.consensus = { verdict: state.caseState, rate: 1.0 };
     hideLoadingOverlay();
-    pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
-    showToast(`Adjudication completed! Verdict: ${verdict}`);
     renderAll();
   } catch(err) {
-    console.error(err);
     state.isAdjudicating = false;
     state.caseState = "SUBMITTED";
     hideLoadingOverlay();
-    pushLog(`Adjudication failed: ${err.message}`, "error");
     showToast(`Adjudication failed: ${err.message}`, "error");
     renderAll();
   }
 }
 
 async function raiseAppeal() {
-  const contractAddress = getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.appealJustification.trim()) {
-    alert("Please enter the appeal justification or supplementary documentation.");
-    return;
-  }
-
+  const contractAddress = await getContractAddress();
   try {
-    showLoadingOverlay("Running Validator Re-consensus", "Submitting decentralized appeal & re-evaluating with AI nodes...");
+    showLoadingOverlay("Running Validator Re-consensus", "Submitting appeal...");
     const client = getClient();
-    state.caseState = "APPEALED";
-    pushLog(`Submitting decentralized appeal & re-running validator consensus...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "request_adjudication",
-      args: [state.caseId, state.evidence.githubUrl || "https://github.com"],
-    });
-
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, state.evidence.githubUrl || "https://github.com"] });
     await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
-
     state.caseState = "ACCEPTED";
     state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
-    saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`Validator re-consensus completed after appeal! Verdict updated. TxHash: ${txHash}`, "success");
-    showToast("Appeal processed! Validator consensus updated.");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Appeal failed: ${err.message}`, "error");
     showToast(`Appeal failed: ${err.message}`, "error");
   }
 }
 
 async function finalizeSettlement(percent){
-  const contractAddress = getContractAddress();
-  if(!contractAddress) return;
-  
+  const contractAddress = await getContractAddress();
   try {
-    showLoadingOverlay("Finalizing Settlement", `Calculating and registering payout (${percent}%) on-chain...`);
+    showLoadingOverlay("Finalizing Settlement", `Calculating payout...`);
     const client = getClient();
-    const p = Math.max(0, Math.min(100, Number(percent)));
-    pushLog(`Finalizing and calculating settlement (${p}%) on-chain...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "finalize_and_calculate_settlement",
-      args: [state.caseId, BigInt(p)],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
-
-    const payout = Math.floor((state.escrowBalance * p) / 100);
-    state.settlementAmount = payout;
-    state.overridePercent = p;
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "finalize_and_calculate_settlement", args: [state.caseId, BigInt(percent)] });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    state.settlementAmount = Math.floor((state.escrowBalance * percent) / 100);
+    state.overridePercent = percent;
     state.caseState = "FINALIZED";
-    saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`Finalization success! Calculated payout: ${payout} GEN. TxHash: ${txHash}`, "success");
-    showToast(`Settlement finalized: ${payout} GEN`);
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Finalization failed: ${err.message}`, "error");
     showToast(`Finalization failed: ${err.message}`, "error");
   }
 }
 
 async function settleCase(){
-  const contractAddress = getContractAddress();
-  if(!contractAddress) return;
-
+  const contractAddress = await getContractAddress();
   try {
-    showLoadingOverlay("Releasing Escrow", "Triggering verdict-bound payout and transferring tokens on-chain...");
+    showLoadingOverlay("Releasing Escrow", "Triggering payout...");
     const client = getClient();
-    pushLog(`Triggering verdict-bound payout and releasing escrow on-chain...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "settle_case",
-      args: [state.caseId],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
-
+    const txHash = await client.writeContract({ address: contractAddress, functionName: "settle_case", args: [state.caseId] });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
     state.caseState = "SETTLED";
-    saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`settle_case success! Funds released to recipient wallets. TxHash: ${txHash}`, "success");
-    showToast("Escrow released & case fully settled!");
+    showToast("Case fully settled!");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Settlement failed: ${err.message}`, "error");
     showToast(`Settlement failed: ${err.message}`, "error");
   }
 }
 
 function resetCase(){
-  state = {
-    ...state,
-    caseCreated:false, caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""},
-    sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null,
-    requirementResults:[], computedScore:null, overridePercent:null,
-    settlementAmount:null, appealJustification:"", appealed:false,
-  };
-  pushLog(`— case reset —`, "info");
-  showToast("Started new case session.");
+  state = { ...state, caseCreated:false, caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""}, isAdjudicating:false, consensus:null, settlementAmount:null };
   state.activeTab = "buyer";
   renderAll();
 }
-
-function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
 
 function setTab(t){ state.activeTab = t; renderAll(); }
 
@@ -1049,24 +842,12 @@ function renderLog(){
   }
   el.innerHTML = state.log.map(l => {
     let formattedText = escapeHtml(l.text);
-
     formattedText = formattedText.replace(/(0x[a-fA-F0-9]{10,})/g, (hash) => {
       const explorerUrl = `https://explorer-studio.genlayer.com/tx/${hash}`;
       return `<a href="${explorerUrl}" target="_blank" class="text-cyan-400 underline hover:text-cyan-300 font-mono inline-flex items-center gap-1" title="View on GenLayer Explorer">${hash.slice(0, 10)}... ↗</a>`;
     });
-
-    return `
-      <div class="fade-up border-l-2 border-slate-700 pl-2">
-        <span class="text-slate-600">[${l.time}]</span> <span class="${colorFor(l.kind)}">${formattedText}</span>
-      </div>
-    `;
+    return `<div class="fade-up border-l-2 border-slate-700 pl-2"><span class="text-slate-600">[${l.time}]</span> <span class="${colorFor(l.kind)}">${formattedText}</span></div>`;
   }).join("");
-}
-
-function currentDisplayScore(){
-  if(state.overridePercent !== null && state.overridePercent !== undefined) return state.overridePercent;
-  if(state.computedScore !== null) return state.computedScore;
-  return 100;
 }
 
 function renderScale(){
@@ -1076,373 +857,12 @@ function renderScale(){
   const badge = document.getElementById("scoreBadge");
   badge.textContent = state.consensus ? score + "%" : "— %";
   badge.className = "font-mono text-xs px-2 py-0.5 rounded-full " + (score >= 60 ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300");
-
-  holder.innerHTML = `
-  <svg viewBox="0 0 400 260" class="w-full max-w-[320px]">
-    <defs>
-      <linearGradient id="pillarGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#22d3ee"/>
-      </linearGradient>
-      <radialGradient id="baseGlow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    <ellipse cx="200" cy="235" rx="120" ry="14" fill="url(#baseGlow)"/>
-    <rect x="170" y="222" width="60" height="10" rx="2" fill="#1e293b" stroke="#334155"/>
-    <rect x="150" y="232" width="100" height="8" rx="2" fill="#0f172a" stroke="#334155"/>
-    <rect x="195" y="92" width="10" height="132" rx="3" fill="url(#pillarGrad)"/>
-    <circle cx="200" cy="92" r="7" fill="#22d3ee"/>
-    <g class="scale-beam" style="transform:rotate(${angle}deg)">
-      <rect x="90" y="88" width="220" height="5" rx="2.5" fill="#94a3b8"/>
-      <line x1="110" y1="90" x2="110" y2="128" stroke="#64748b" stroke-width="1.5"/>
-      <path d="M90 128 Q110 148 130 128" fill="none" stroke="${score < 50 ? '#f87171' : '#475569'}" stroke-width="3" stroke-linecap="round"/>
-      <line x1="290" y1="90" x2="290" y2="128" stroke="#64748b" stroke-width="1.5"/>
-      <path d="M270 128 Q290 148 310 128" fill="none" stroke="${score >= 60 ? '#34d399' : '#475569'}" stroke-width="3" stroke-linecap="round"/>
-    </g>
-    <circle cx="200" cy="40" r="5" fill="#8b5cf6"/>
-    <text x="200" y="18" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="IBM Plex Mono, monospace">GENLAYER CONSENSUS</text>
-  </svg>`;
-}
-
-function renderBuyerTab(){
-  const disabledCreate = state.caseCreated;
-  const disabledFund = !state.caseCreated || state.caseState !== "DRAFT";
-  return `
-    <div class="glass rounded-2xl p-6 space-y-6 fade-up">
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 class="font-display text-lg font-600 mb-1">Create &amp; Fund Agreement</h2>
-          <p class="text-sm text-slate-400">Define the case, bind both parties, and lock payment into escrow on-chain.</p>
-        </div>
-        ${state.caseCreated ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 1 — Case Created</span>` : `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-slate-700/40 text-slate-400 border border-slate-600/40">Step 1 of 2</span>`}
-      </div>
-
-      <div class="grid md:grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs text-slate-400 mb-1 block">Case ID</label>
-          <input id="inpCaseId" value="${state.caseId}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
-        </div>
-        <div>
-          <label class="text-xs text-slate-400 mb-1 block">Provider address</label>
-          <input id="inpProvider" value="${state.providerAddress}" placeholder="0x..." ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
-        </div>
-      </div>
-
-      <div class="flex items-center gap-3 flex-wrap">
-        <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
-          ${disabledCreate ? "✓ Case Created" : "Create Case On-Chain"}
-        </button>
-        <button id="btnConnectCase" class="btn px-5 py-3 rounded-xl bg-slate-800/80 border border-slate-700 text-cyan-300 text-xs hover:bg-slate-700/80">
-          🔗 Connect to Case
-        </button>
-      </div>
-
-      <div>
-        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims</label>
-        <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden">
-          ${state.agreement.requirements.map(r => `
-            <div class="flex items-center justify-between px-3 py-2 text-sm">
-              <span class="text-slate-300"><span class="text-cyan-400 font-mono text-xs mr-2">${r.id}</span>${r.description}</span>
-              <span class="font-mono text-xs text-amber-300">${r.weight}%</span>
-            </div>`).join("")}
-        </div>
-      </div>
-
-      <div class="border-t border-slate-700/50 pt-5">
-        <div class="flex items-center justify-between mb-1">
-          <label class="text-xs text-slate-400 block">Escrow amount (GEN)</label>
-          ${state.caseState === "ACTIVE" ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 2 — Escrow Funded</span>` : ''}
-        </div>
-        <div class="flex flex-col sm:flex-row gap-3">
-          <input id="inpFundAmount" type="number" min="1" value="500" ${disabledFund?'disabled':''} class="rounded-lg px-3 py-2 sm:w-48 ${disabledFund?'opacity-60':''}" />
-          <button id="btnFundCase" ${disabledFund?'disabled':''} class="btn glow-amber px-6 py-3 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-200">
-            Fund Escrow (Payable)
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderProviderTab(){
-  const disabled = state.caseState !== "ACTIVE";
-  const connectedWallet = state.buyerAddress.trim().toLowerCase();
-  const isProviderActive = !disabled && (!connectedWallet || !state.providerAddress || connectedWallet === state.providerAddress.trim().toLowerCase());
-
-  return `
-    <div class="glass rounded-2xl p-6 space-y-5 fade-up">
-      <div>
-        <h2 class="font-display text-lg font-600 mb-1">Submit Delivery Evidence</h2>
-        <p class="text-sm text-slate-400">Package proof of completed work to be stored securely on-chain.</p>
-      </div>
-
-      ${(!disabled && connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) ? `
-        <div class="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 font-mono text-xs">
-          ⚠️ Connected wallet does not match registered provider address. Switch accounts in Web3 wallet to submit delivery.
-        </div>
-      ` : ''}
-
-      <div class="grid md:grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs text-slate-400 mb-1 block">GitHub repository URL / Raw Document URL</label>
-          <input id="inpGithub" value="${state.evidence.githubUrl}" placeholder="https://raw.githubusercontent.com/.../README_mismatch.md" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
-        </div>
-        <div>
-          <label class="text-xs text-slate-400 mb-1 block">Live API URL</label>
-          <input id="inpApiUrl" value="${state.evidence.apiUrl}" placeholder="https://api.yourservice.dev" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
-        </div>
-      </div>
-
-      <div>
-        <label class="text-xs text-slate-400 mb-1 block">Delivery notes</label>
-        <textarea id="inpNotes" rows="5" placeholder="Description of the implemented solution..." class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''}>${state.evidence.notes}</textarea>
-      </div>
-
-      <button id="btnSubmitDelivery" ${(!isProviderActive)?'disabled':''} class="btn glow-violet px-6 py-3 rounded-xl bg-violet-500/15 border border-violet-400/40 text-violet-200">
-        Submit Delivery On-Chain
-      </button>
-    </div>
-  `;
-}
-
-function renderCourtTab(){
-  const canAdjudicate = state.caseState === "SUBMITTED";
-  const inConsensus = ["ACCEPTED","DISPUTED"].includes(state.caseState);
-  const isDisputed = state.caseState === "DISPUTED";
-  const isAccepted = state.caseState === "ACCEPTED";
-  const canFinalize = inConsensus || state.caseState === "APPEALED";
-  const canSettle = state.caseState === "FINALIZED";
-
-  const totalEscrow = Number(state.escrowBalance) || 500;
-  const defaultProviderPercent = isAccepted ? 100 : (isDisputed ? 0 : 100);
-
-  return `
-    <div class="glass rounded-2xl p-6 space-y-6 fade-up">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 class="font-display text-lg font-600 mb-1">AI Adjudication &amp; Validator Consensus</h2>
-          <p class="text-sm text-slate-400">Execute decentralized validation on GenLayer network.</p>
-        </div>
-        <button id="btnAdjudicate" ${(!canAdjudicate || state.isAdjudicating)?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 whitespace-nowrap">
-          ${state.isAdjudicating ? "Running Consensus…" : "Request AI Adjudication"}
-        </button>
-      </div>
-
-      ${state.consensus ? `
-        <div class="rounded-xl border ${isAccepted?'border-emerald-500/40 bg-emerald-500/10':'border-red-500/40 bg-red-500/10'} p-4 flex items-center justify-between flex-wrap gap-3 shadow-lg">
-          <div>
-            <div class="font-mono text-xs text-slate-400 mb-1">Verdict Result</div>
-            <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
-          </div>
-          <div class="text-right font-mono text-xs text-slate-300">
-            GenLayer Validator Consensus <span class="text-emerald-400 ml-1">✓ Verified</span>
-          </div>
-        </div>
-
-        <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Itemized Requirement Breakdown</span>
-            <span class="font-mono text-[11px] ${isDisputed ? 'text-red-300 bg-red-500/10 border-red-500/25' : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'} px-2 py-0.5 rounded border">
-                ${isDisputed ? 'Verdict Reasoning: Requirements Failed / Contradicted' : 'All Requirements Verified Satisfied'}
-            </span>
-          </div>
-          <div class="space-y-2 text-xs font-mono">
-            ${state.agreement.requirements.map(r => {
-              const status = getRequirementStatus(r.id);
-              return `
-                <div class="flex items-center justify-between bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/80">
-                  <span class="text-slate-300"><span class="text-cyan-400 mr-2">${r.id}</span>${r.description}</span>
-                  <span class="${status.cls} font-600">${status.label} (${r.weight}%)</span>
-                </div>
-              `;
-            }).join("")}
-          </div>
-        </div>
-      ` : ''}
-
-      ${isDisputed ? `
-        <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
-          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Dispute Detected — Request Validator Re-consensus</h3>
-          <p class="text-xs text-slate-300">The validator consensus returned a DISPUTED state. You can submit appeal justification for decentralized re-evaluation by AI nodes.</p>
-          <textarea id="inpAppealJustification" rows="3" placeholder="Provide appeal justification or updated repository reference..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
-          <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
-            Submit Appeal &amp; Re-run Validator Consensus
-          </button>
-        </div>
-      ` : ''}
-
-      ${canFinalize ? `
-        <div class="border-t border-slate-700/50 pt-5 space-y-4">
-          <div class="flex items-center justify-between">
-            <h3 class="font-display text-sm font-600 text-slate-200">Smart Settlement Distribution</h3>
-            <span class="font-mono text-xs px-2.5 py-1 rounded-full ${isAccepted ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}">
-              ${isAccepted ? '✨ Full Payout to Provider' : '🛡️ Full Refund to Buyer (Disputed)'}
-            </span>
-          </div>
-
-          <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-4">
-            <div class="grid grid-cols-2 gap-4 text-xs font-mono">
-              <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                <span class="text-slate-400 block mb-1">Buyer Refund</span>
-                <span class="text-cyan-300 text-base font-600" id="buyerRefundPreview">${totalEscrow - (totalEscrow * defaultProviderPercent / 100)} GEN</span>
-              </div>
-              <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                <span class="text-slate-400 block mb-1">Provider Payout</span>
-                <span class="text-emerald-300 text-base font-600" id="providerPayoutPreview">${(totalEscrow * defaultProviderPercent / 100)} GEN</span>
-              </div>
-            </div>
-
-            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              <div class="flex items-center gap-2">
-                <input id="inpPercent" type="number" min="0" max="100" value="${defaultProviderPercent}" class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300" />
-                <span class="text-xs text-slate-400 font-mono">% to Provider</span>
-              </div>
-              <button id="btnFinalize" class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 sm:ml-auto text-xs">
-                Calculate &amp; Lock Distribution
-              </button>
-            </div>
-          </div>
-        </div>
-      ` : ''}
-
-      ${canSettle ? `
-        <div class="border-t border-slate-700/50 pt-5 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <div class="text-xs text-slate-400 font-mono">Final Distributed Amount</div>
-            <div class="font-display text-2xl font-700 text-emerald-300">${state.settlementAmount} GEN</div>
-          </div>
-          <button id="btnSettle" class="btn glow-green px-6 py-3 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-100">
-            Release Escrow &amp; Settle Case
-          </button>
-        </div>
-      ` : ''}
-
-      ${state.caseState === "SETTLED" ? `
-        <div class="border-t border-slate-700/50 pt-5 flex items-center justify-between flex-wrap gap-3">
-          <div class="text-sm text-emerald-300 font-mono">✓ Case fully settled on-chain via token transfers.</div>
-          <button id="btnReset" class="btn px-5 py-2.5 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-300 text-xs">Start New Case</button>
-        </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-function renderHistoryTab() {
-  return `
-    <div class="glass rounded-2xl p-6 space-y-4 fade-up">
-      <div>
-        <h2 class="font-display text-lg font-600 mb-1">On-Chain Case History &amp; Audit Trail</h2>
-        <p class="text-sm text-slate-400">Review all active and past cases registered on the GenLayer Studionet.</p>
-      </div>
-
-      <div class="space-y-3">
-        ${(!state.caseHistory || state.caseHistory.length === 0) ? `
-          <div class="text-slate-500 text-sm py-8 text-center font-mono">No cases recorded in session history yet.</div>
-        ` : state.caseHistory.map(c => `
-          <div class="glass p-4 rounded-xl border border-slate-700/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div>
-              <div class="flex items-center gap-2 mb-1">
-                <span class="font-mono text-cyan-300 font-600">${c.caseId}</span>
-                <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${c.state}</span>
-              </div>
-              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? c.provider.slice(0,6)+'...'+c.provider.slice(-4) : '—'}</div>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-mono text-slate-500">[${c.time}]</span>
-              <a href="https://explorer-studio.genlayer.com" target="_blank" class="btn px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs">
-                Explorer ↗
-              </a>
-            </div>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderTabContent(){
-  const el = document.getElementById("tabContent");
-  if(state.activeTab === "buyer") el.innerHTML = renderBuyerTab();
-  else if(state.activeTab === "provider") el.innerHTML = renderProviderTab();
-  else if(state.activeTab === "court") el.innerHTML = renderCourtTab();
-  else if(state.activeTab === "history") el.innerHTML = renderHistoryTab();
-  bindTabEvents();
-}
-
-function renderTabButtons(){
-  document.querySelectorAll(".tabBtnEl").forEach(btn => {
-    const t = btn.getAttribute("data-tab");
-    const active = t === state.activeTab;
-    btn.className = "tabBtnEl tab-btn flex-1 py-2.5 rounded-xl font-display text-sm font-600 " +
-      (active ? "bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-white border border-cyan-400/30"
-              : "text-slate-400 hover:text-slate-200 hover:bg-white/5");
-  });
+  holder.innerHTML = `<svg viewBox="0 0 400 260" class="w-full max-w-[320px]"><defs><linearGradient id="pillarGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient><radialGradient id="baseGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#22d3ee" stop-opacity="0.35"/><stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/></radialGradient></defs><ellipse cx="200" cy="235" rx="120" ry="14" fill="url(#baseGlow)"/><rect x="170" y="222" width="60" height="10" rx="2" fill="#1e293b" stroke="#334155"/><rect x="150" y="232" width="100" height="8" rx="2" fill="#0f172a" stroke="#334155"/><rect x="195" y="92" width="10" height="132" rx="3" fill="url(#pillarGrad)"/><circle cx="200" cy="92" r="7" fill="#22d3ee"/><g class="scale-beam" style="transform:rotate(${angle}deg)"><rect x="90" y="88" width="220" height="5" rx="2.5" fill="#94a3b8"/><line x1="110" y1="90" x2="110" y2="128" stroke="#64748b" stroke-width="1.5"/><path d="M90 128 Q110 148 130 128" fill="none" stroke="${score < 50 ? '#f87171' : '#475569'}" stroke-width="3" stroke-linecap="round"/><line x1="290" y1="90" x2="290" y2="128" stroke="#64748b" stroke-width="1.5"/><path d="M270 128 Q290 148 310 128" fill="none" stroke="${score >= 60 ? '#34d399' : '#475569'}" stroke-width="3" stroke-linecap="round"/></g><circle cx="200" cy="40" r="5" fill="#8b5cf6"/><text x="200" y="18" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="IBM Plex Mono, monospace">GENLAYER CONSENSUS</text></svg>`;
 }
 
 function bindStaticEvents(){
-  document.querySelectorAll(".tabBtnEl").forEach(btn => {
-    btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab")));
-  });
+  document.querySelectorAll(".tabBtnEl").forEach(btn => btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab"))));
 }
-
-function bindTabEvents(){
-  const byId = id => document.getElementById(id);
-
-  if(state.activeTab === "buyer"){
-    byId("inpCaseId")?.addEventListener("input", e => { state.caseId = e.target.value; });
-    byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
-    byId("btnCreateCase")?.addEventListener("click", createCase);
-    byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
-    byId("btnFundCase")?.addEventListener("click", () => {
-      const amt = Number(byId("inpFundAmount").value);
-      fundCase(amt);
-    });
-  }
-
-  if(state.activeTab === "provider"){
-    byId("inpGithub")?.addEventListener("input", e => { state.evidence.githubUrl = e.target.value; });
-    byId("inpApiUrl")?.addEventListener("input", e => { state.evidence.apiUrl = e.target.value; });
-    byId("inpNotes")?.addEventListener("input", e => { state.evidence.notes = e.target.value; });
-    byId("btnSubmitDelivery")?.addEventListener("click", submitDelivery);
-  }
-
-  if(state.activeTab === "court"){
-    byId("btnAdjudicate")?.addEventListener("click", requestAdjudication);
-    byId("inpAppealJustification")?.addEventListener("input", e => { state.appealJustification = e.target.value; });
-    byId("btnAppeal")?.addEventListener("click", raiseAppeal);
-    
-    byId("inpPercent")?.addEventListener("input", e => {
-      const p = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-      const total = Number(state.escrowBalance) || 500;
-      const provAmt = (total * p) / 100;
-      const buyAmt = total - provAmt;
-      
-      const provEl = document.getElementById("providerPayoutPreview");
-      const buyEl = document.getElementById("buyerRefundPreview");
-      if(provEl) provEl.textContent = provAmt + " GEN";
-      if(buyEl) buyEl.textContent = buyAmt + " GEN";
-    });
-
-    byId("btnFinalize")?.addEventListener("click", () => {
-      const p = byId("inpPercent").value;
-      finalizeSettlement(p);
-    });
-    byId("btnSettle")?.addEventListener("click", settleCase);
-    byId("btnReset")?.addEventListener("click", resetCase);
-  }
-}
-
-function renderAll(){
-  renderStateStrip();
-  renderTabButtons();
-  renderTabContent();
-  renderScale();
-  renderCaseSummary();
-  renderLog();
-  updateWorkflowStepper();
-}
-
 bindStaticEvents();
 renderAll();
 </script>
