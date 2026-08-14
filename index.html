@@ -766,6 +766,37 @@ async function submitDelivery(){
   }
 }
 
+async function connectToExistingCase() {
+  const contractAddress = getContractAddress();
+  const connectedWallet = state.buyerAddress ? state.buyerAddress.trim() : "";
+  
+  if(!contractAddress) { showToast("Contract Address is missing", "error"); return; }
+  if(!connectedWallet) { showToast("Please connect your Web3 wallet first!", "error"); return; }
+
+  try {
+    showLoadingOverlay("Syncing Case", `Syncing case with connected wallet: ${connectedWallet.slice(0,6)}...`);
+    const client = getClient();
+    
+    // تنظیم آدرس پروایدر به صورت خودکار بر اساس ولت متصل شده
+    state.providerAddress = connectedWallet;
+    state.caseCreated = true;
+    state.caseState = "ACTIVE"; 
+    
+    hideLoadingOverlay();
+    pushLog(`Successfully connected and synced case for provider: ${connectedWallet.slice(0,6)}...`, "success");
+    showToast("Connected to case successfully!");
+    
+    // هدایت خودکار به تب پروایدر
+    state.activeTab = "provider";
+    renderAll();
+  } catch(err) {
+    console.error(err);
+    hideLoadingOverlay();
+    pushLog(`Failed to connect to case: ${err.message}`, "error");
+    showToast(`Connection failed: ${err.message}`, "error");
+  }
+}
+
 async function requestAdjudication(){
   const contractAddress = getContractAddress();
   if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
@@ -1098,6 +1129,15 @@ function renderBuyerTab(){
         </div>
       </div>
 
+      <div class="flex items-center gap-3 flex-wrap">
+        <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
+          ${disabledCreate ? "✓ Case Created" : "Create Case On-Chain"}
+        </button>
+        <button id="btnConnectCase" class="btn px-5 py-3 rounded-xl bg-slate-800/80 border border-slate-700 text-cyan-300 text-xs hover:bg-slate-700/80">
+          🔗 Connect to Case
+        </button>
+      </div>
+
       <div>
         <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims</label>
         <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden">
@@ -1109,7 +1149,7 @@ function renderBuyerTab(){
         </div>
       </div>
 
-      <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan w-full md:w-auto px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
+      <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan w-full md:w-auto px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 hidden">
         ${disabledCreate ? "✓ Case Created" : "Create Case On-Chain"}
       </button>
 
@@ -1335,6 +1375,7 @@ function bindTabEvents(){
     byId("inpCaseId")?.addEventListener("input", e => { state.caseId = e.target.value; });
     byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
     byId("btnCreateCase")?.addEventListener("click", createCase);
+    byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
     byId("btnFundCase")?.addEventListener("click", () => {
       const amt = Number(byId("inpFundAmount").value);
       fundCase(amt);
