@@ -228,14 +228,10 @@
     </div>
   </header>
 
-  <div class="glass rounded-2xl px-6 py-4 mb-6 grid md:grid-cols-2 gap-4 items-center">
+  <div class="glass rounded-2xl px-6 py-4 mb-6">
     <div>
       <label class="text-xs text-slate-400 block mb-1">Smart Contract Address</label>
       <input id="globalContractAddress" value="0xC0A2EbEfA1df7D2a2Ed97EBe3d9E1d4886A52c80" class="w-full rounded-lg px-3 py-2" />
-    </div>
-    <div>
-      <label class="text-xs text-slate-400 block mb-1">Active Wallet Address (msg.sender)</label>
-      <input id="globalWalletAddress" placeholder="Not connected..." readonly class="w-full rounded-lg px-3 py-2 bg-slate-900/50 text-cyan-300 cursor-not-allowed" />
     </div>
   </div>
 
@@ -396,7 +392,7 @@ let state = {
   agreement: JSON.parse(JSON.stringify(DEFAULT_AGREEMENT)),
   caseId: DEFAULT_AGREEMENT.case_id,
   buyerAddress: "",
-  providerAddress: "0xP902...aC3d",
+  providerAddress: "",
   caseCreated: false,
   caseState: "DRAFT",
   escrowBalance: 0,
@@ -574,13 +570,13 @@ function disconnectWallet() {
 }
 
 function updateWalletUI(walletAddress) {
-  const walletInput = document.getElementById("globalWalletAddress");
   const container = document.getElementById("walletProfileContainer");
   const dropdown = document.getElementById("accountDropdown");
   
   if(dropdown) dropdown.classList.add("hidden");
 
-  if(walletInput) walletInput.value = walletAddress || "";
+  // Save active wallet into hidden global state representation
+  state.buyerAddress = walletAddress || "";
 
   if(!walletAddress) {
     container.innerHTML = `
@@ -620,7 +616,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnDisconnectWallet")?.addEventListener("click", disconnectWallet);
   document.getElementById("btnThemeToggle")?.addEventListener("click", toggleTheme);
   document.getElementById("btnCopyAddress")?.addEventListener("click", () => {
-    const addr = document.getElementById("globalWalletAddress")?.value;
+    const addr = state.buyerAddress;
     if(addr) {
       navigator.clipboard.writeText(addr);
       pushLog("Wallet address copied to clipboard.", "success");
@@ -727,6 +723,13 @@ async function submitDelivery(){
   if(!contractAddress){ pushLog("submit_delivery() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
   if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() error: case is not ACTIVE", "error"); showToast("Case is not ACTIVE", "error"); return; }
   
+  const connectedWallet = state.buyerAddress.trim().toLowerCase();
+  if (connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) {
+    pushLog(`submit_delivery() error: Connected wallet is not the registered provider`, "error");
+    showToast("Error: You must switch to the Provider wallet address to submit delivery!", "error");
+    return;
+  }
+
   const evidencePackage = JSON.stringify({
     githubUrl: state.evidence.githubUrl,
     apiUrl: state.evidence.apiUrl,
@@ -998,8 +1001,8 @@ function renderCaseSummary(){
   el.innerHTML = `
     <div class="flex justify-between"><span class="text-slate-500">case_id</span><span class="text-cyan-300">${state.caseId}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">state</span><span class="px-2 py-0.5 rounded ${cls} text-[11px]">${label}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${document.getElementById("globalWalletAddress")?.value || "Connected Wallet"}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">provider</span><span>${state.providerAddress}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${state.buyerAddress ? state.buyerAddress.slice(0,6)+'...'+state.buyerAddress.slice(-4) : "Not connected"}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">provider</span><span>${state.providerAddress ? state.providerAddress.slice(0,6)+'...'+state.providerAddress.slice(-4) : "—"}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">escrow</span><span class="text-amber-300">${state.escrowBalance} GEN</span></div>
     <div class="flex justify-between"><span class="text-slate-500">verdict</span><span>${state.consensus ? state.consensus.verdict : "—"}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">settlement</span><span class="text-emerald-300">${state.settlementAmount !== null ? state.settlementAmount + " GEN" : "—"}</span></div>
@@ -1091,7 +1094,7 @@ function renderBuyerTab(){
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Provider address</label>
-          <input id="inpProvider" value="${state.providerAddress}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
+          <input id="inpProvider" value="${state.providerAddress}" placeholder="0x..." ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
       </div>
 
@@ -1128,12 +1131,21 @@ function renderBuyerTab(){
 
 function renderProviderTab(){
   const disabled = state.caseState !== "ACTIVE";
+  const connectedWallet = state.buyerAddress.trim().toLowerCase();
+  const isProviderActive = !disabled && (!connectedWallet || !state.providerAddress || connectedWallet === state.providerAddress.trim().toLowerCase());
+
   return `
     <div class="glass rounded-2xl p-6 space-y-5 fade-up">
       <div>
         <h2 class="font-display text-lg font-600 mb-1">Submit Delivery Evidence</h2>
         <p class="text-sm text-slate-400">Package proof of completed work to be stored securely on-chain.</p>
       </div>
+
+      ${(!disabled && connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) ? `
+        <div class="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 font-mono text-xs">
+          ⚠️ Connected wallet does not match registered provider address. Switch accounts in Web3 wallet to submit delivery.
+        </div>
+      ` : ''}
 
       <div class="grid md:grid-cols-2 gap-4">
         <div>
@@ -1151,7 +1163,7 @@ function renderProviderTab(){
         <textarea id="inpNotes" rows="5" placeholder="Description of the implemented solution..." class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''}>${state.evidence.notes}</textarea>
       </div>
 
-      <button id="btnSubmitDelivery" ${disabled?'disabled':''} class="btn glow-violet px-6 py-3 rounded-xl bg-violet-500/15 border border-violet-400/40 text-violet-200">
+      <button id="btnSubmitDelivery" ${(!isProviderActive)?'disabled':''} class="btn glow-violet px-6 py-3 rounded-xl bg-violet-500/15 border border-violet-400/40 text-violet-200">
         Submit Delivery On-Chain
       </button>
     </div>
@@ -1194,6 +1206,7 @@ function renderCourtTab(){
             <span class="font-mono text-[11px] ${isDisputed ? 'text-red-300 bg-red-500/10 border-red-500/25' : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'} px-2 py-0.5 rounded border">
                 ${isDisputed ? 'Verdict Reasoning: Requirements Failed / Contradicted' : 'All Requirements Verified Satisfied'}
             </span>
+
           </div>
           <div class="space-y-2 text-xs font-mono">
             ${state.agreement.requirements.map(r => {
@@ -1275,7 +1288,7 @@ function renderHistoryTab() {
                 <span class="font-mono text-cyan-300 font-600">${c.caseId}</span>
                 <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${c.state}</span>
               </div>
-              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider.slice(0,6)}...${c.provider.slice(-4)}</div>
+              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? c.provider.slice(0,6)+'...'+c.provider.slice(-4) : '—'}</div>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-[11px] font-mono text-slate-500">[${c.time}]</span>
