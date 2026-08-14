@@ -355,12 +355,10 @@
 import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
-// Fixed Registry Contract Address on Studionet for automatic instance discovery
 const FIXED_REGISTRY_ADDRESS = "0x42Cf94434cBb800654cf9D4eb1048B48acfA0Ff8";
 let cachedCourtAddress = "";
 let backgroundPollingInterval = null;
 
-// Automatically fetches the active AgentCourt instance address from the Registry contract
 async function getContractAddress() {
   if (cachedCourtAddress) return cachedCourtAddress;
   try {
@@ -408,12 +406,35 @@ const DEFAULT_AGREEMENT = {
     "Input Sanitization must fully protect against SQL Injection"
   ],
   requirements: [
-    { id: "R1", description: "OAuth2 Authentication mandatory for all API routes", weight: 25 },
-    { id: "R2", description: "Rate Limiting implemented against DoS attacks", weight: 25 },
-    { id: "R3", description: "AES-256 Encryption applied to all stored sensitive data", weight: 25 },
-    { id: "R4", description: "Input Sanitization fully protects against SQL Injection", weight: 25 }
+    { id: "R1", description: "Invariant Testing ensuring core contract rules and escrow balances are never violated", weight: 6 },
+    { id: "R2", description: "Reentrancy Guard implemented for all token withdrawals and transfers", weight: 6 },
+    { id: "R3", description: "Formal Verification ensuring mathematical proof of contract logic correctness", weight: 5 },
+    { id: "R4", description: "Strict Access Control and Multi-Signature restrictions for privileged functions", weight: 5 },
+    { id: "R5", description: "AES-256 Encryption applied to all stored sensitive data", weight: 5 },
+    { id: "R6", description: "Input Sanitization fully protecting against SQL Injection", weight: 5 },
+    { id: "R7", description: "LLM Determinism Control and strict consensus bounds among validating nodes", weight: 5 },
+    { id: "R8", description: "OAuth2 Authentication mandatory for all API routes", weight: 4 },
+    { id: "R9", description: "Validator Collusion Resistance with slashing mechanisms for malicious voting", weight: 4 },
+    { id: "R10", description: "Complete Unit Test Coverage covering at least 80% to 100% of core logic", weight: 4 },
+    { id: "R11", description: "Environment Variables security with zero hardcoded private keys or secrets", weight: 4 },
+    { id: "R12", description: "MEV and Front-Running Resistance for transaction ordering", weight: 4 },
+    { id: "R13", description: "Comprehensive Error Handling wrapping all async operations and DB queries", weight: 4 },
+    { id: "R14", description: "Gas Optimization keeping loops and state variables minimal", weight: 4 },
+    { id: "R15", description: "State Management preventing garbage data accumulation in TreeMaps", weight: 4 },
+    { id: "R16", description: "Type Safety and Linting standards passing with zero fatal warnings", weight: 3 },
+    { id: "R17", description: "Integration Tests validating successful API responses and error codes", weight: 3 },
+    { id: "R18", description: "Modular Architecture separating business logic, routing, and database interactions", weight: 3 },
+    { id: "R19", description: "Automated CI/CD Pipelines with static analysis filters", weight: 3 },
+    { id: "R20", description: "XSS Protection ensuring user inputs are escaped and sanitized", weight: 3 },
+    { id: "R21", description: "CORS Policy configured to disallow unauthorized wildcard origins", weight: 3 },
+    { id: "R22", description: "Rate Limiting implemented against DoS attacks", weight: 3 },
+    { id: "R23", description: "Async/Await Usage avoiding callback hell for asynchronous control flow", weight: 2 },
+    { id: "R24", description: "JWT Token Validation with secure signature verification and expiration checks", weight: 2 },
+    { id: "R25", description: "Advanced Gas Optimization minimizing loop complexity and data structures", weight: 2 },
+    { id: "R26", description: "Edge Cases and Error States comprehensively covered in testing", weight: 2 },
+    { id: "R27", description: "Static Analysis Filters integrated to block vulnerable patterns before deployment", weight: 2 }
   ],
-  adjudication_directive: "Cross-verify the submitted source code or documentation against these claims. If any claim is missing, incomplete, or contradicted by the code, you must strictly rule DISPUTED. Rule ACCEPTED only if all conditions are fully met."
+  adjudication_directive: "Cross-verify the submitted source code or documentation against these requirements. Provide granular audit results including passed requirements and specific failure reasons."
 };
 
 let state = {
@@ -431,6 +452,7 @@ let state = {
   isAdjudicating: false,
   validators: [],
   consensus: null,
+  auditReport: null, // Parsed JSON audit report from smart contract auditor
   requirementResults: [],
   computedScore: null,
   overridePercent: null,
@@ -449,9 +471,14 @@ function escapeHtml(s){
 }
 
 function getRequirementStatus(reqId) {
-    if (!state.consensus) return { label: "Pending", cls: "text-slate-400" };
-    if (state.consensus.verdict === "DISPUTED") return { label: "✕ Failed", cls: "text-red-400" };
-    return { label: "✓ Verified", cls: "text-emerald-400" };
+    if (!state.auditReport) return { label: "Pending", cls: "text-slate-400" };
+    const passedList = state.auditReport.passed_requirements || [];
+    const isPassed = passedList.includes(reqId);
+    if (isPassed) {
+        return { label: "✓ Verified", cls: "text-emerald-400" };
+    } else {
+        return { label: "✕ Failed", cls: "text-red-400" };
+    }
 }
 
 function nowStamp(){
@@ -481,7 +508,6 @@ function saveCaseToHistory() {
   }
 }
 
-// Automatically fetch all associated cases for the connected wallet address from smart contract
 async function fetchUserCases(walletAddress) {
   const contractAddress = await getContractAddress();
   if (!contractAddress || !walletAddress) return;
@@ -535,6 +561,25 @@ async function fetchOnChainHistory() {
         state.escrowBalance = Number(escrowVal) / 10**18;
       }
       
+      // Fetch audit report if adjudication has occurred
+      if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formattedState)) {
+        const auditRes = await client.readContract({
+          address: contractAddress,
+          functionName: "get_audit_report",
+          args: [state.caseId],
+        }).catch(() => "{}");
+
+        try {
+          state.auditReport = JSON.parse(auditRes);
+          if (state.auditReport && state.auditReport.total_score !== undefined) {
+            state.overridePercent = Number(state.auditReport.total_score);
+          }
+          state.consensus = { verdict: formattedState, rate: 1.0 };
+        } catch(e) {
+          state.auditReport = null;
+        }
+      }
+
       const existingIdx = state.caseHistory.findIndex(c => c.caseId === state.caseId);
       if (existingIdx === -1) {
         state.caseHistory.unshift({
@@ -554,7 +599,6 @@ async function fetchOnChainHistory() {
   }
 }
 
-// Auto-sync active case data and user cases list as soon as the wallet connects
 async function autoSyncOnWalletConnect(walletAddress) {
   if (!walletAddress) return;
   pushLog(`Wallet connected: auto-syncing cases for ${walletAddress.slice(0,6)}...`, "info");
@@ -563,7 +607,6 @@ async function autoSyncOnWalletConnect(walletAddress) {
   renderAll();
 }
 
-// Real-time background polling loop to sync case states automatically without manual refresh
 async function startRealtimePollingLoop() {
   if (backgroundPollingInterval) clearInterval(backgroundPollingInterval);
   backgroundPollingInterval = setInterval(async () => {
@@ -583,15 +626,24 @@ async function startRealtimePollingLoop() {
           pushLog(`Polling detected state change: ${state.caseState} -> ${cleanedState}`, "success");
           state.caseState = cleanedState;
           if (["ACCEPTED", "DISPUTED"].includes(cleanedState)) {
+            const auditRes = await client.readContract({
+              address: contractAddress,
+              functionName: "get_audit_report",
+              args: [state.caseId],
+            }).catch(() => "{}");
+            try {
+              state.auditReport = JSON.parse(auditRes);
+              if (state.auditReport && state.auditReport.total_score !== undefined) {
+                state.overridePercent = Number(state.auditReport.total_score);
+              }
+            } catch(e){}
             state.consensus = { verdict: cleanedState, rate: 1.0 };
           }
           saveCaseToHistory();
           renderAll();
         }
       }
-    } catch (e) {
-      // Silent catch for background polling ticks
-    }
+    } catch (e) {}
   }, 10000);
 }
 
@@ -821,7 +873,6 @@ async function createCase(){
     pushLog(`create_case success! TxHash: ${txHash}`, "success");
     showToast("Case created successfully on-chain!");
     
-    // Refresh user cases list after creation
     if (state.buyerAddress) {
       await fetchUserCases(state.buyerAddress);
     }
@@ -931,10 +982,7 @@ async function connectToExistingCase() {
 
   try {
     showLoadingOverlay("Syncing Case", `Syncing case with connected wallet: ${connectedWallet.slice(0,6)}...`);
-    
-    // Refresh user cases list to populate selection dropdown
     await fetchUserCases(connectedWallet);
-    
     hideLoadingOverlay();
     pushLog(`Successfully synced cases for connected wallet: ${connectedWallet.slice(0,6)}...`, "success");
     showToast("Cases synced successfully!");
@@ -956,8 +1004,8 @@ async function requestAdjudication(){
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
-  showLoadingOverlay("AI Adjudication in Progress", "Executing non-deterministic LLM nodes & waiting for GenLayer validator consensus...");
-  pushLog(`Requesting AI adjudication & GenLayer validator consensus on-chain...`, "info");
+  showLoadingOverlay("Smart Code Auditor in Progress", "Executing AI auditor nodes & evaluating 27 code requirements...");
+  pushLog(`Requesting Smart Code Audit & GenLayer validator consensus on-chain...`, "info");
 
   try {
     const client = getClient();
@@ -981,14 +1029,29 @@ async function requestAdjudication(){
       args: [state.caseId],
     });
 
+    const auditRes = await client.readContract({
+      address: contractAddress,
+      functionName: "get_audit_report",
+      args: [state.caseId],
+    }).catch(() => "{}");
+
+    try {
+      state.auditReport = JSON.parse(auditRes);
+      if (state.auditReport && state.auditReport.total_score !== undefined) {
+        state.overridePercent = Number(state.auditReport.total_score);
+      }
+    } catch(e) {
+      state.auditReport = null;
+    }
+
     const verdict = String(verdictResult || "ACCEPTED");
     state.caseState = verdict;
     state.isAdjudicating = false;
     state.consensus = { verdict, rate: 1.0 };
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`AI Adjudication & Consensus completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
-    showToast(`Adjudication completed! Verdict: ${verdict}`);
+    pushLog(`Smart Code Audit completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
+    showToast(`Audit completed! Verdict: ${verdict}`);
     renderAll();
   } catch(err) {
     console.error(err);
@@ -1022,6 +1085,19 @@ async function raiseAppeal() {
     });
 
     await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+
+    const auditRes = await client.readContract({
+      address: contractAddress,
+      functionName: "get_audit_report",
+      args: [state.caseId],
+    }).catch(() => "{}");
+
+    try {
+      state.auditReport = JSON.parse(auditRes);
+      if (state.auditReport && state.auditReport.total_score !== undefined) {
+        state.overridePercent = Number(state.auditReport.total_score);
+      }
+    } catch(e){}
 
     state.caseState = "ACCEPTED";
     state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
@@ -1116,7 +1192,7 @@ function resetCase(){
   state = {
     ...state,
     caseCreated:false, caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""},
-    sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null,
+    sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null, auditReport:null,
     requirementResults:[], computedScore:null, overridePercent:null,
     settlementAmount:null, appealJustification:"", appealed:false,
   };
@@ -1130,7 +1206,6 @@ function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
 
 function setTab(t){ state.activeTab = t; renderAll(); }
 
-// Render dynamic case selector bar if multiple cases are found for the connected wallet
 function renderCaseSelectorBar() {
   const container = document.getElementById("dynamicCaseSelectorContainer");
   if (!container) return;
@@ -1245,8 +1320,8 @@ function renderLog(){
 }
 
 function currentDisplayScore(){
+  if(state.auditReport && state.auditReport.total_score !== undefined) return Number(state.auditReport.total_score);
   if(state.overridePercent !== null && state.overridePercent !== undefined) return state.overridePercent;
-  if(state.computedScore !== null) return state.computedScore;
   return 100;
 }
 
@@ -1282,7 +1357,7 @@ function renderScale(){
       <path d="M270 128 Q290 148 310 128" fill="none" stroke="${score >= 60 ? '#34d399' : '#475569'}" stroke-width="3" stroke-linecap="round"/>
     </g>
     <circle cx="200" cy="40" r="5" fill="#8b5cf6"/>
-    <text x="200" y="18" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="IBM Plex Mono, monospace">GENLAYER CONSENSUS</text>
+    <text x="200" y="18" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="IBM Plex Mono, monospace">SMART CODE AUDITOR</text>
   </svg>`;
 }
 
@@ -1320,8 +1395,8 @@ function renderBuyerTab(){
       </div>
 
       <div>
-        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims</label>
-        <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden">
+        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims (27 Standards)</label>
+        <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden max-h-64 overflow-y-auto">
           ${state.agreement.requirements.map(r => `
             <div class="flex items-center justify-between px-3 py-2 text-sm">
               <span class="text-slate-300"><span class="text-cyan-400 font-mono text-xs mr-2">${r.id}</span>${r.description}</span>
@@ -1396,59 +1471,88 @@ function renderCourtTab(){
   const canSettle = state.caseState === "FINALIZED";
 
   const totalEscrow = Number(state.escrowBalance) || 500;
-  const defaultProviderPercent = isAccepted ? 100 : (isDisputed ? 0 : 100);
+  const auditScore = state.auditReport && state.auditReport.total_score !== undefined ? Number(state.auditReport.total_score) : (isAccepted ? 100 : (isDisputed ? 0 : 100));
+  const defaultProviderPercent = isDisputed ? 0 : auditScore;
+
+  // Extract passed and failed requirements from smart contract audit report JSON
+  const passedReqs = state.auditReport && state.auditReport.passed_requirements ? state.auditReport.passed_requirements : [];
+  const failedReqsObj = state.auditReport && state.auditReport.failed_requirements ? state.auditReport.failed_requirements : [];
 
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 class="font-display text-lg font-600 mb-1">AI Adjudication &amp; Validator Consensus</h2>
-          <p class="text-sm text-slate-400">Execute decentralized validation on GenLayer network.</p>
+          <h2 class="font-display text-lg font-600 mb-1">Smart Code Auditor &amp; AI Adjudication</h2>
+          <p class="text-sm text-slate-400">Decentralized code inspection and granular requirements verification.</p>
         </div>
         <button id="btnAdjudicate" ${(!canAdjudicate || state.isAdjudicating)?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 whitespace-nowrap">
-          ${state.isAdjudicating ? "Running Consensus…" : "Request AI Adjudication"}
+          ${state.isAdjudicating ? "Running Code Audit…" : "Request Smart Code Audit"}
         </button>
       </div>
 
       ${state.consensus ? `
         <div class="rounded-xl border ${isAccepted?'border-emerald-500/40 bg-emerald-500/10':'border-red-500/40 bg-red-500/10'} p-4 flex items-center justify-between flex-wrap gap-3 shadow-lg">
           <div>
-            <div class="font-mono text-xs text-slate-400 mb-1">Verdict Result</div>
+            <div class="font-mono text-xs text-slate-400 mb-1">Audit Verdict Result</div>
             <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
           </div>
           <div class="text-right font-mono text-xs text-slate-300">
-            GenLayer Validator Consensus <span class="text-emerald-400 ml-1">✓ Verified</span>
+            Earned Code Quality Score: <span class="${isAccepted?'text-emerald-400':'text-red-400'} font-bold text-base">${auditScore}%</span>
           </div>
         </div>
 
-        <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="font-display text-xs font-600 text-slate-300 uppercase tracking-wider">Itemized Requirement Breakdown</span>
-            <span class="font-mono text-[11px] ${isDisputed ? 'text-red-300 bg-red-500/10 border-red-500/25' : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'} px-2 py-0.5 rounded border">
-                ${isDisputed ? 'Verdict Reasoning: Requirements Failed / Contradicted' : 'All Requirements Verified Satisfied'}
-            </span>
+        <!-- Detailed Audit Breakdown Section -->
+        <div class="grid md:grid-cols-2 gap-4">
+          <!-- Passed Requirements (Green / Checkmark) -->
+          <div class="glass p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+            <h3 class="font-display text-xs font-600 text-emerald-300 uppercase tracking-wider flex items-center gap-2">
+              <span>✅ Passed Standards (${passedReqs.length})</span>
+            </h3>
+            <div class="space-y-2 max-h-48 overflow-y-auto pr-1 text-xs font-mono">
+              ${passedReqs.length === 0 ? `<div class="text-slate-500">No standards successfully passed.</div>` : passedReqs.map(rId => {
+                const reqItem = state.agreement.requirements.find(r => r.id === rId);
+                return `
+                  <div class="flex items-center justify-between bg-emerald-950/30 p-2 rounded border border-emerald-500/20 text-emerald-200">
+                    <span><strong class="text-emerald-400 mr-1">${rId}:</strong> ${reqItem ? reqItem.description : 'Standard ' + rId}</span>
+                    <span class="text-emerald-400">✓ Pass</span>
+                  </div>
+                `;
+              }).join("")}
+            </div>
           </div>
-          <div class="space-y-2 text-xs font-mono">
-            ${state.agreement.requirements.map(r => {
-              const status = getRequirementStatus(r.id);
-              return `
-                <div class="flex items-center justify-between bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/80">
-                  <span class="text-slate-300"><span class="text-cyan-400 mr-2">${r.id}</span>${r.description}</span>
-                  <span class="${status.cls} font-600">${status.label} (${r.weight}%)</span>
-                </div>
-              `;
-            }).join("")}
+
+          <!-- Failed / Violated Requirements (Red / Cross with Developer Fix Reasons) -->
+          <div class="glass p-4 rounded-xl border border-red-500/30 bg-red-500/5 space-y-3">
+            <h3 class="font-display text-xs font-600 text-red-300 uppercase tracking-wider flex items-center gap-2">
+              <span>❌ Violated / Missing Standards (${failedReqsObj.length})</span>
+            </h3>
+            <div class="space-y-2 max-h-48 overflow-y-auto pr-1 text-xs font-mono">
+              ${failedReqsObj.length === 0 ? `<div class="text-slate-500">No violations detected. Clean audit!</div>` : failedReqsObj.map(f => {
+                const reqItem = state.agreement.requirements.find(r => r.id === f.id);
+                return `
+                  <div class="bg-red-950/30 p-2.5 rounded border border-red-500/20 text-red-200 space-y-1">
+                    <div class="flex justify-between font-bold">
+                      <span class="text-red-400">${f.id} Violation</span>
+                    </div>
+                    <div class="text-[11px] text-slate-300">${reqItem ? reqItem.description : ''}</div>
+                    <div class="text-[11px] text-amber-300 bg-red-950/60 p-1.5 rounded border border-red-500/30 mt-1">
+                      💡 <strong>Auditor Reason:</strong> ${escapeHtml(f.reason)}
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
           </div>
         </div>
       ` : ''}
 
       ${isDisputed ? `
         <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
-          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Dispute Detected — Request Validator Re-consensus</h3>
-          <p class="text-xs text-slate-300">The validator consensus returned a DISPUTED state. You can submit appeal justification for decentralized re-evaluation by AI nodes.</p>
-          <textarea id="inpAppealJustification" rows="3" placeholder="Provide appeal justification or updated repository reference..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
+          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Audit Disputed — Request Re-evaluation</h3>
+          <p class="text-xs text-slate-300">The code auditor identified gaps. Address the reasons above in your repository, then submit appeal justification for re-auditing.</p>
+          <textarea id="inpAppealJustification" rows="3" placeholder="Provide justification or repository fix references..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
           <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
-            Submit Appeal &amp; Re-run Validator Consensus
+            Submit Appeal &amp; Re-run Code Audit
           </button>
         </div>
       ` : ''}
@@ -1456,9 +1560,9 @@ function renderCourtTab(){
       ${canFinalize ? `
         <div class="border-t border-slate-700/50 pt-5 space-y-4">
           <div class="flex items-center justify-between">
-            <h3 class="font-display text-sm font-600 text-slate-200">Smart Settlement Distribution</h3>
+            <h3 class="font-display text-sm font-600 text-slate-200">Smart Settlement Distribution (Score-Based)</h3>
             <span class="font-mono text-xs px-2.5 py-1 rounded-full ${isAccepted ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}">
-              ${isAccepted ? '✨ Full Payout to Provider' : '🛡️ Full Refund to Buyer (Disputed)'}
+              ${isAccepted ? `✨ Payout based on code quality score (${auditScore}%)` : '🛡️ Full Refund to Buyer (Audit Failed)'}
             </span>
           </div>
 
@@ -1469,15 +1573,15 @@ function renderCourtTab(){
                 <span class="text-cyan-300 text-base font-600" id="buyerRefundPreview">${totalEscrow - (totalEscrow * defaultProviderPercent / 100)} GEN</span>
               </div>
               <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                <span class="text-slate-400 block mb-1">Provider Payout</span>
+                <span class="text-slate-400 block mb-1">Provider Earned Payout (${auditScore}%)</span>
                 <span class="text-emerald-300 text-base font-600" id="providerPayoutPreview">${(totalEscrow * defaultProviderPercent / 100)} GEN</span>
               </div>
             </div>
 
             <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <div class="flex items-center gap-2">
-                <input id="inpPercent" type="number" min="0" max="100" value="${defaultProviderPercent}" class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300" />
-                <span class="text-xs text-slate-400 font-mono">% to Provider</span>
+                <input id="inpPercent" type="number" min="0" max="100" value="${defaultProviderPercent}" ${isDisputed ? 'disabled' : ''} class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300 ${isDisputed ? 'opacity-60' : ''}" />
+                <span class="text-xs text-slate-400 font-mono">% Share to Provider</span>
               </div>
               <button id="btnFinalize" class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 sm:ml-auto text-xs">
                 Calculate &amp; Lock Distribution
