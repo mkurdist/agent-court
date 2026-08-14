@@ -238,6 +238,9 @@
     </span>
   </div>
 
+  <!-- Dynamic Multi-Case Selector Bar -->
+  <div id="dynamicCaseSelectorContainer"></div>
+
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
     <div id="stateStrip" class="flex items-center gap-1 min-w-[880px] md:min-w-0"></div>
   </div>
@@ -419,6 +422,7 @@ let state = {
   caseId: DEFAULT_AGREEMENT.case_id,
   buyerAddress: "",
   providerAddress: "",
+  userCasesList: [],
   caseCreated: false,
   caseState: "DRAFT",
   escrowBalance: 0,
@@ -477,13 +481,41 @@ function saveCaseToHistory() {
   }
 }
 
-// Option 3: Automatically fetch on-chain history and cases from contract storage/events
+// Automatically fetch all associated cases for the connected wallet address from smart contract
+async function fetchUserCases(walletAddress) {
+  const contractAddress = await getContractAddress();
+  if (!contractAddress || !walletAddress) return;
+  try {
+    const client = getClient();
+    const casesStr = await client.readContract({
+      address: contractAddress,
+      functionName: "get_cases_by_address",
+      args: [walletAddress],
+    });
+
+    if (casesStr && typeof casesStr === 'string' && casesStr.trim() !== "") {
+      const caseIds = casesStr.split(",").map(c => c.trim()).filter(Boolean);
+      state.userCasesList = caseIds;
+      if (caseIds.length > 0) {
+        if (!state.caseId || !caseIds.includes(state.caseId)) {
+          state.caseId = caseIds[caseIds.length - 1];
+        }
+        pushLog(`Auto-discovered ${caseIds.length} cases for wallet. Active case: ${state.caseId}`, "success");
+        await fetchOnChainHistory();
+      }
+    } else {
+      state.userCasesList = [];
+    }
+  } catch (err) {
+    console.warn("Failed to auto-discover cases for wallet:", err);
+  }
+}
+
 async function fetchOnChainHistory() {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return;
   try {
     const client = getClient();
-    // Check state of the default or active case ID from chain
     const remoteState = await client.readContract({
       address: contractAddress,
       functionName: "get_case_state",
@@ -522,15 +554,16 @@ async function fetchOnChainHistory() {
   }
 }
 
-// Option 1: Auto-sync active case data as soon as the wallet is connected
+// Auto-sync active case data and user cases list as soon as the wallet connects
 async function autoSyncOnWalletConnect(walletAddress) {
   if (!walletAddress) return;
-  pushLog(`Wallet connected: auto-syncing case data for ${walletAddress.slice(0,6)}...`, "info");
+  pushLog(`Wallet connected: auto-syncing cases for ${walletAddress.slice(0,6)}...`, "info");
+  await fetchUserCases(walletAddress);
   await fetchOnChainHistory();
   renderAll();
 }
 
-// Option 2: Real-time background polling loop to sync case states automatically without manual refresh
+// Real-time background polling loop to sync case states automatically without manual refresh
 async function startRealtimePollingLoop() {
   if (backgroundPollingInterval) clearInterval(backgroundPollingInterval);
   backgroundPollingInterval = setInterval(async () => {
@@ -557,7 +590,7 @@ async function startRealtimePollingLoop() {
         }
       }
     } catch (e) {
-      // Silent catch for polling background ticks
+      // Silent catch for background polling ticks
     }
   }, 10000);
 }
@@ -666,7 +699,6 @@ async function connectWallet() {
     pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
     showToast("Wallet connected successfully!");
 
-    // Execute Option 1: Auto-Sync on Wallet Connect
     await autoSyncOnWalletConnect(walletAddress);
 
   } catch (err) {
@@ -737,7 +769,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Fetch the active registry-synced contract address and start background real-time polling loop
   await getContractAddress();
   await fetchOnChainHistory();
   startRealtimePollingLoop();
@@ -789,6 +820,11 @@ async function createCase(){
     hideLoadingOverlay();
     pushLog(`create_case success! TxHash: ${txHash}`, "success");
     showToast("Case created successfully on-chain!");
+    
+    // Refresh user cases list after creation
+    if (state.buyerAddress) {
+      await fetchUserCases(state.buyerAddress);
+    }
     renderAll();
   } catch(err) {
     console.error(err);
@@ -895,17 +931,13 @@ async function connectToExistingCase() {
 
   try {
     showLoadingOverlay("Syncing Case", `Syncing case with connected wallet: ${connectedWallet.slice(0,6)}...`);
-    const client = getClient();
     
-    state.providerAddress = connectedWallet;
-    state.caseCreated = true;
-    state.caseState = "ACTIVE"; 
+    // Refresh user cases list to populate selection dropdown
+    await fetchUserCases(connectedWallet);
     
     hideLoadingOverlay();
-    pushLog(`Successfully connected and synced case for provider: ${connectedWallet.slice(0,6)}...`, "success");
-    showToast("Connected to case successfully!");
-    
-    state.activeTab = "provider";
+    pushLog(`Successfully synced cases for connected wallet: ${connectedWallet.slice(0,6)}...`, "success");
+    showToast("Cases synced successfully!");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -1097,6 +1129,37 @@ function resetCase(){
 function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
 
 function setTab(t){ state.activeTab = t; renderAll(); }
+
+// Render dynamic case selector bar if multiple cases are found for the connected wallet
+function renderCaseSelectorBar() {
+  const container = document.getElementById("dynamicCaseSelectorContainer");
+  if (!container) return;
+  if (!state.userCasesList || state.userCasesList.length <= 0) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `
+    <div class="glass rounded-2xl px-6 py-4 mb-6 flex items-center justify-between flex-wrap gap-3 border border-cyan-500/30">
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-cyan-300 font-mono font-600">Active Wallet Cases (${state.userCasesList.length}):</span>
+        <select id="walletCaseDropdown" class="rounded-lg px-3 py-1.5 text-xs font-mono bg-slate-900 text-cyan-200 border border-slate-700">
+          ${state.userCasesList.map(id => `
+            <option value="${id}" ${id === state.caseId ? 'selected' : ''}>Case ID: ${id}</option>
+          `).join("")}
+        </select>
+      </div>
+      <span class="text-[11px] text-slate-400 font-mono">Switch instantly between your assigned on-chain cases</span>
+    </div>
+  `;
+  document.getElementById("walletCaseDropdown")?.addEventListener("change", async (e) => {
+    state.caseId = e.target.value;
+    showLoadingOverlay("Switching Case", `Loading details for case ${state.caseId}...`);
+    await fetchOnChainHistory();
+    hideLoadingOverlay();
+    renderAll();
+    showToast(`Switched active case to: ${state.caseId}`);
+  });
+}
 
 function renderStateStrip(){
   const el = document.getElementById("stateStrip");
@@ -1552,6 +1615,7 @@ function bindTabEvents(){
 }
 
 function renderAll(){
+  renderCaseSelectorBar();
   renderStateStrip();
   renderTabButtons();
   renderTabContent();
