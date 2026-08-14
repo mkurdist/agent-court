@@ -350,7 +350,7 @@ import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
 function getClient() {
-  const walletAddr = document.getElementById("globalWalletAddress")?.value.trim();
+  const walletAddr = state.buyerAddress ? state.buyerAddress.trim() : undefined;
   return createClient({
     chain: studionet,
     account: walletAddr ? walletAddr : undefined,
