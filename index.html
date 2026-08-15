@@ -934,6 +934,48 @@ async function connectToExistingCase() {
   }
 }
 
+// Added missing submitDelivery function to fix the Uncaught ReferenceError
+async function submitDelivery(){
+  const contractAddress = await getContractAddress();
+  if(!contractAddress){ showToast("Contract Address is missing", "error"); return; }
+  if(state.caseState !== "ACTIVE"){ showToast("Case is not ACTIVE", "error"); return; }
+  
+  const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
+  if (connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) {
+    showToast("Error: You must switch to the Provider wallet address to submit delivery!", "error");
+    return;
+  }
+
+  const evidencePackage = JSON.stringify({
+    githubUrl: state.evidence.githubUrl,
+    apiUrl: state.evidence.apiUrl,
+    notes: state.evidence.notes
+  });
+
+  try {
+    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence package on-chain...");
+    const client = getClient();
+
+    const txHash = await client.writeContract({
+      address: contractAddress,
+      functionName: "submit_delivery",
+      args: [state.caseId, evidencePackage],
+    });
+
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
+
+    state.caseState = "SUBMITTED";
+    saveCaseToHistory();
+    hideLoadingOverlay();
+    showToast("Delivery evidence submitted on-chain!");
+    renderAll();
+  } catch(err) {
+    console.error(err);
+    hideLoadingOverlay();
+    showToast(`Submission failed: ${err.message}`, "error");
+  }
+}
+
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
   if(!contractAddress || state.caseState !== "SUBMITTED" || state.isAdjudicating) return;
