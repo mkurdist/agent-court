@@ -351,7 +351,6 @@ import { studionet } from "genlayer-js/chains";
 
 const FIXED_REGISTRY_ADDRESS = "0x42Cf94434cBb800654cf9D4eb1048B48acfA0Ff8";
 let cachedCourtAddress = "";
-let backgroundPollingInterval = null;
 
 async function getContractAddress() {
   if (cachedCourtAddress) return cachedCourtAddress;
@@ -682,45 +681,16 @@ async function autoSyncOnWalletConnect(walletAddress) {
   renderAll();
 }
 
-async function startRealtimePollingLoop() {
-  if (backgroundPollingInterval) clearInterval(backgroundPollingInterval);
-  backgroundPollingInterval = setInterval(async () => {
-    if (!state.caseId) return;
-    const contractAddress = await getContractAddress();
-    if (!contractAddress) return;
-    try {
-      const client = getClient();
-      const latestState = await client.readContract({
-        address: contractAddress,
-        functionName: "get_case_state",
-        args: [state.caseId],
-      });
-      if (latestState && typeof latestState === 'string') {
-        const cleanedState = latestState.trim();
-        if (cleanedState && cleanedState !== state.caseState) {
-          pushLog(`State changed: ${state.caseState} -> ${cleanedState}`, "success");
-          state.caseState = cleanedState;
-          if (["ACCEPTED", "DISPUTED"].includes(cleanedState)) {
-            const auditRes = await client.readContract({
-              address: contractAddress,
-              functionName: "get_audit_report",
-              args: [state.caseId],
-            }).catch(() => "{}");
-            try {
-              state.auditReport = JSON.parse(auditRes);
-              if (state.auditReport && state.auditReport.total_score !== undefined) {
-                state.overridePercent = Number(state.auditReport.total_score);
-              }
-            } catch(e){}
-            state.consensus = { verdict: cleanedState, rate: 1.0 };
-          }
-          saveCaseToHistory();
-          renderAll();
-        }
-      }
-    } catch (e) {}
-  }, 10000);
-}
+// REMOVED: startRealtimePollingLoop() background setInterval polling was firing an
+// RPC call every 10s regardless of user activity, which is what triggered the
+// 429 (Too Many Requests) responses and related CORS failures under load. Sync
+// now happens only in two places, both user/action-triggered:
+//   1. autoSyncOnWalletConnect() — runs once automatically right after the wallet
+//      connects (see connectWallet() and the 'accountsChanged' listener below).
+//   2. Manually — via the "Sync Case" button (connectToExistingCase) or by
+//      switching a case in the case dropdown (renderCaseSelectorBar's change
+//      handler), both of which call fetchOnChainHistory()/fetchUserCases() once.
+// There is no longer any timer-based background refresh.
 
 function toggleTheme() {
   const body = document.body;
@@ -883,9 +853,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // FIX: no automatic fetchOnChainHistory()/polling on page load anymore either —
+  // per the requested behavior, on-chain sync only happens (1) right after wallet
+  // connect via autoSyncOnWalletConnect(), or (2) on a manual "Sync Case" click /
+  // case-dropdown switch. getContractAddress() just resolves the registry address,
+  // it does not touch case data.
   await getContractAddress();
-  await fetchOnChainHistory();
-  startRealtimePollingLoop();
   renderAll();
 });
 
