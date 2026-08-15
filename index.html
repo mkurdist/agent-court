@@ -250,16 +250,16 @@
       <span class="font-display text-xs font-600 text-cyan-300 uppercase tracking-wider flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span> Protocol Workflow Stepper
       </span>
-      <span id="stepperHintBadge" class="font-mono text-xs px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">Step 1: Create Case On-Chain</span>
+      <span id="stepperHintBadge" class="font-mono text-xs px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">Step 1: Create & Fund Case On-Chain</span>
     </div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
       <div id="stepCard1" class="p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all">
         <span class="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px]">1</span>
-        <span>Create Case</span>
+        <span>Create & Fund</span>
       </div>
       <div id="stepCard2" class="p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all">
         <span class="w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]">2</span>
-        <span>Fund Escrow</span>
+        <span>Active Escrow</span>
       </div>
       <div id="stepCard3" class="p-3 rounded-xl border border-slate-700/60 bg-slate-900/40 text-slate-400 flex items-center gap-2 transition-all">
         <span class="w-5 h-5 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center font-bold text-[10px]">3</span>
@@ -452,7 +452,7 @@ let state = {
   isAdjudicating: false,
   validators: [],
   consensus: null,
-  auditReport: null, // Parsed JSON audit report from smart contract auditor
+  auditReport: null,
   requirementResults: [],
   computedScore: null,
   overridePercent: null,
@@ -461,6 +461,8 @@ let state = {
   appealed: false,
   caseHistory: [],
   log: [],
+  selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id), // All checked by default
+  customReqs: [] // Array of custom rule descriptions added by buyer
 };
 
 window.state = state;
@@ -561,7 +563,6 @@ async function fetchOnChainHistory() {
         state.escrowBalance = Number(escrowVal) / 10**18;
       }
       
-      // Fetch audit report if adjudication has occurred
       if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formattedState)) {
         const auditRes = await client.readContract({
           address: contractAddress,
@@ -713,11 +714,7 @@ function updateWorkflowStepper() {
   if(!state.caseCreated) {
     step1.className = "p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all glow-cyan";
     step1.querySelector("span").className = "w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px]";
-    if(hintBadge) hintBadge.textContent = "Step 1: Fill Case ID & Create Case On-Chain";
-  } else if(state.caseState === "DRAFT") {
-    step2.className = "p-3 rounded-xl border border-amber-400/50 bg-amber-500/10 text-amber-200 flex items-center gap-2 transition-all glow-amber";
-    step2.querySelector("span").className = "w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-[10px]";
-    if(hintBadge) hintBadge.textContent = "Step 2: Fund Escrow (Lock GEN on-chain)";
+    if(hintBadge) hintBadge.textContent = "Step 1: Select Rules & Create/Fund Case On-Chain";
   } else if(state.caseState === "ACTIVE") {
     step3.className = "p-3 rounded-xl border border-violet-400/50 bg-violet-500/10 text-violet-200 flex items-center gap-2 transition-all glow-violet";
     step3.querySelector("span").className = "w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 flex items-center justify-center font-bold text-[10px]";
@@ -844,64 +841,45 @@ if (typeof window.ethereum !== 'undefined') {
   });
 }
 
-async function createCase(){
+// Single-step Atomic Create and Fund Transaction
+async function createAndFundCase(){
   const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("create_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.caseId || !state.caseId.trim()){ pushLog("create_case() error: case_id is required", "error"); showToast("Case ID is required", "error"); return; }
-  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("create_case() error: provider address is required", "error"); showToast("Provider address is required", "error"); return; }
+  if(!contractAddress){ pushLog("error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
+  if(!state.caseId || !state.caseId.trim()){ pushLog("error: case_id is required", "error"); showToast("Case ID is required", "error"); return; }
+  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("error: provider address is required", "error"); showToast("Provider address is required", "error"); return; }
   
-  try {
-    showLoadingOverlay("Creating Case On-Chain", `Registering case "${state.caseId}" in GenLayer Intelligent Contract...`);
-    const client = getClient();
-    pushLog(`Sending on-chain transaction: create_case("${state.caseId}")...`, "info");
-    
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "create_case",
-      args: [state.caseId, JSON.stringify(state.agreement), state.providerAddress],
-    });
+  const fundAmount = Number(document.getElementById("inpFundAmount")?.value || 500);
+  if(isNaN(fundAmount) || fundAmount <= 0){ showToast("Valid escrow amount is required", "error"); return; }
 
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
+  // Build active requirements list based on checkboxes + custom rules
+  const activeReqs = DEFAULT_AGREEMENT.requirements.filter(r => state.selectedReqs.includes(r.id));
+  state.customReqs.forEach((cr, idx) => {
+    activeReqs.push({ id: `C${idx+1}`, description: cr, weight: 5 });
+  });
 
-    state.caseCreated = true;
-    state.caseState = "DRAFT";
-    saveCaseToHistory();
-    hideLoadingOverlay();
-    pushLog(`create_case success! TxHash: ${txHash}`, "success");
-    showToast("Case created successfully on-chain!");
-    
-    if (state.buyerAddress) {
-      await fetchUserCases(state.buyerAddress);
-    }
-    renderAll();
-  } catch(err) {
-    console.error(err);
-    hideLoadingOverlay();
-    pushLog(`create_case failed: ${err.message}`, "error");
-    showToast(`Transaction failed: ${err.message}`, "error");
+  // Normalize weights to sum up to 100%
+  const totalWeight = activeReqs.reduce((sum, r) => sum + r.weight, 0);
+  if (totalWeight > 0) {
+    activeReqs.forEach(r => r.weight = Math.round((r.weight / totalWeight) * 100));
   }
-}
 
-async function fundCase(amountGEN){
-  const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("fund_case() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.caseCreated){ pushLog("fund_case() error: create the case first", "error"); showToast("Create the case first", "error"); return; }
-  if(state.caseState !== "DRAFT"){ pushLog("fund_case() error: invalid state for funding", "error"); showToast("Invalid state for funding", "error"); return; }
-  if(!amountGEN || isNaN(amountGEN) || amountGEN <= 0){ pushLog("fund_case() error: amount must be > 0", "error"); showToast("Amount must be > 0", "error"); return; }
+  const finalAgreement = {
+    ...DEFAULT_AGREEMENT,
+    case_id: state.caseId,
+    requirements: activeReqs
+  };
+  state.agreement = finalAgreement;
 
   try {
-    showLoadingOverlay("Locking Escrow Funds", `Transferring ${amountGEN} GEN into payable escrow on GenLayer...`);
+    showLoadingOverlay("Creating & Funding Escrow", `Registering case & locking ${fundAmount} GEN in a single atomic transaction...`);
     const client = getClient();
-    const amountWei = BigInt(amountGEN) * 10n ** 18n; 
-    pushLog(`Locking ${amountGEN} GEN into payable escrow on-chain...`, "info");
+    const amountWei = BigInt(fundAmount) * 10n ** 18n; 
+    pushLog(`Sending atomic create_and_fund_case for "${state.caseId}" with ${fundAmount} GEN...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
-      functionName: "fund_case",
-      args: [state.caseId],
+      functionName: "create_and_fund_case",
+      args: [state.caseId, JSON.stringify(finalAgreement), state.providerAddress],
       value: amountWei, 
     });
 
@@ -910,66 +888,23 @@ async function fundCase(amountGEN){
       waitUntil: "finalized",
     });
 
-    state.escrowBalance = amountGEN;
+    state.caseCreated = true;
     state.caseState = "ACTIVE";
+    state.escrowBalance = fundAmount;
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`fund_case success! Escrow funded with ${amountGEN} GEN. TxHash: ${txHash}`, "success");
-    showToast(`Escrow funded with ${amountGEN} GEN successfully!`);
+    pushLog(`create_and_fund_case success! TxHash: ${txHash}`, "success");
+    showToast("Case created and escrow funded successfully in 1 click!");
+    
+    if (state.buyerAddress) {
+      await fetchUserCases(state.buyerAddress);
+    }
     renderAll();
   } catch(err) {
     console.error(err);
     hideLoadingOverlay();
-    pushLog(`fund_case failed: ${err.message}`, "error");
-    showToast(`Escrow funding failed: ${err.message}`, "error");
-  }
-}
-
-async function submitDelivery(){
-  const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("submit_delivery() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(state.caseState !== "ACTIVE"){ pushLog("submit_delivery() error: case is not ACTIVE", "error"); showToast("Case is not ACTIVE", "error"); return; }
-  
-  const connectedWallet = state.buyerAddress.trim().toLowerCase();
-  if (connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) {
-    pushLog(`submit_delivery() error: Connected wallet is not the registered provider`, "error");
-    showToast("Error: You must switch to the Provider wallet address to submit delivery!", "error");
-    return;
-  }
-
-  const evidencePackage = JSON.stringify({
-    githubUrl: state.evidence.githubUrl,
-    apiUrl: state.evidence.apiUrl,
-    notes: state.evidence.notes
-  });
-
-  try {
-    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence package on-chain...");
-    const client = getClient();
-    pushLog(`Submitting delivery evidence package on-chain...`, "info");
-
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "submit_delivery",
-      args: [state.caseId, evidencePackage],
-    });
-
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
-
-    state.caseState = "SUBMITTED";
-    saveCaseToHistory();
-    hideLoadingOverlay();
-    pushLog(`submit_delivery success! Evidence stored on-chain. TxHash: ${txHash}`, "success");
-    showToast("Delivery evidence submitted on-chain!");
-    renderAll();
-  } catch(err) {
-    console.error(err);
-    hideLoadingOverlay();
-    pushLog(`submit_delivery failed: ${err.message}`, "error");
-    showToast(`Submission failed: ${err.message}`, "error");
+    pushLog(`create_and_fund_case failed: ${err.message}`, "error");
+    showToast(`Transaction failed: ${err.message}`, "error");
   }
 }
 
@@ -1004,7 +939,7 @@ async function requestAdjudication(){
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
-  showLoadingOverlay("Smart Code Auditor in Progress", "Executing AI auditor nodes & evaluating 27 code requirements...");
+  showLoadingOverlay("Smart Code Auditor in Progress", "Executing AI auditor nodes & evaluating selected code requirements...");
   pushLog(`Requesting Smart Code Audit & GenLayer validator consensus on-chain...`, "info");
 
   try {
@@ -1195,6 +1130,8 @@ function resetCase(){
     sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null, auditReport:null,
     requirementResults:[], computedScore:null, overridePercent:null,
     settlementAmount:null, appealJustification:"", appealed:false,
+    selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id),
+    customReqs: []
   };
   pushLog(`— case reset —`, "info");
   showToast("Started new case session.");
@@ -1363,15 +1300,14 @@ function renderScale(){
 
 function renderBuyerTab(){
   const disabledCreate = state.caseCreated;
-  const disabledFund = !state.caseCreated || state.caseState !== "DRAFT";
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
       <div class="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 class="font-display text-lg font-600 mb-1">Create &amp; Fund Agreement</h2>
-          <p class="text-sm text-slate-400">Define the case, bind both parties, and lock payment into escrow on-chain.</p>
+          <h2 class="font-display text-lg font-600 mb-1">Create, Configure &amp; Fund Agreement</h2>
+          <p class="text-sm text-slate-400">Select standards, add custom rules, and lock escrow in 1-click atomic transaction.</p>
         </div>
-        ${state.caseCreated ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 1 — Case Created</span>` : `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-slate-700/40 text-slate-400 border border-slate-600/40">Step 1 of 2</span>`}
+        ${state.caseCreated ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Case Active &amp; Funded</span>` : `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">Step 1: Configure &amp; Fund</span>`}
       </div>
 
       <div class="grid md:grid-cols-2 gap-4">
@@ -1380,40 +1316,69 @@ function renderBuyerTab(){
           <input id="inpCaseId" value="${state.caseId}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
         <div>
-          <label class="text-xs text-slate-400 mb-1 block">Provider address</label>
+          <label class="text-xs text-slate-400 mb-1 block">Provider Address</label>
           <input id="inpProvider" value="${state.providerAddress}" placeholder="0x..." ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
       </div>
 
-      <div class="flex items-center gap-3 flex-wrap">
-        <button id="btnCreateCase" ${disabledCreate?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200">
-          ${disabledCreate ? "✓ Case Created" : "Create Case On-Chain"}
-        </button>
-        <button id="btnConnectCase" class="btn px-5 py-3 rounded-xl bg-slate-800/80 border border-slate-700 text-cyan-300 text-xs hover:bg-slate-700/80">
-          🔗 Connect to Case
-        </button>
+      <!-- Requirements Selector with Checkboxes & Custom Rule Addition -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <label class="text-xs text-cyan-300 font-mono uppercase tracking-wider block">Select Standards &amp; Custom Rules to Enforce</label>
+          <span class="text-[11px] font-mono text-slate-400">${state.selectedReqs.length} selected + ${state.customReqs.length} custom</span>
+        </div>
+
+        <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden max-h-72 overflow-y-auto bg-slate-900/40">
+          ${DEFAULT_AGREEMENT.requirements.map(r => {
+            const checked = state.selectedReqs.includes(r.id);
+            return `
+              <label class="flex items-center justify-between px-3 py-2.5 text-sm hover:bg-slate-800/40 cursor-pointer transition-colors">
+                <div class="flex items-center gap-2.5">
+                  <input type="checkbox" data-req-id="${r.id}" ${checked ? 'checked' : ''} ${disabledCreate?'disabled':''} class="checkbox-req w-4 h-4 rounded" />
+                  <span class="text-slate-300 text-xs"><strong class="text-cyan-400 font-mono mr-1">${r.id}:</strong> ${r.description}</span>
+                </div>
+                <span class="font-mono text-[11px] text-amber-300 shrink-0 ml-2">${r.weight}%</span>
+              </label>
+            `;
+          }).join("")}
+        </div>
+
+        <!-- Add Custom Rule Section -->
+        ${!disabledCreate ? `
+          <div class="flex gap-2">
+            <input id="inpCustomRule" placeholder="Add custom rule description (e.g., Must include Dockerfile)..." class="w-full rounded-lg px-3 py-2 text-xs" />
+            <button id="btnAddCustomRule" class="btn px-4 py-2 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-xs whitespace-nowrap">
+              + Add Rule
+            </button>
+          </div>
+        ` : ''}
+
+        ${state.customReqs.length > 0 ? `
+          <div class="space-y-1.5 pt-1">
+            <span class="text-[11px] text-slate-400 font-mono">Custom Rules Added:</span>
+            <div class="space-y-1">
+              ${state.customReqs.map((cr, idx) => `
+                <div class="flex items-center justify-between bg-cyan-950/20 px-3 py-1.5 rounded border border-cyan-500/20 text-xs font-mono text-cyan-200">
+                  <span>C${idx+1}: ${escapeHtml(cr)}</span>
+                  ${!disabledCreate ? `<button data-del-custom="${idx}" class="text-red-400 hover:text-red-300 text-[10px]">Remove</button>` : ''}
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ''}
       </div>
 
-      <div>
-        <label class="text-xs text-slate-400 mb-1 block">Agreement requirements &amp; expected claims (27 Standards)</label>
-        <div class="rounded-lg border border-slate-700/60 divide-y divide-slate-700/50 overflow-hidden max-h-64 overflow-y-auto">
-          ${state.agreement.requirements.map(r => `
-            <div class="flex items-center justify-between px-3 py-2 text-sm">
-              <span class="text-slate-300"><span class="text-cyan-400 font-mono text-xs mr-2">${r.id}</span>${r.description}</span>
-              <span class="font-mono text-xs text-amber-300">${r.weight}%</span>
-            </div>`).join("")}
+      <div class="border-t border-slate-700/50 pt-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="w-full sm:w-auto">
+          <label class="text-xs text-slate-400 mb-1 block">Escrow Amount (GEN)</label>
+          <input id="inpFundAmount" type="number" min="1" value="500" ${disabledCreate?'disabled':''} class="rounded-lg px-3 py-2 w-full sm:w-48 ${disabledCreate?'opacity-60':''}" />
         </div>
-      </div>
-
-      <div class="border-t border-slate-700/50 pt-5">
-        <div class="flex items-center justify-between mb-1">
-          <label class="text-xs text-slate-400 block">Escrow amount (GEN)</label>
-          ${state.caseState === "ACTIVE" ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Step 2 — Escrow Funded</span>` : ''}
-        </div>
-        <div class="flex flex-col sm:flex-row gap-3">
-          <input id="inpFundAmount" type="number" min="1" value="500" ${disabledFund?'disabled':''} class="rounded-lg px-3 py-2 sm:w-48 ${disabledFund?'opacity-60':''}" />
-          <button id="btnFundCase" ${disabledFund?'disabled':''} class="btn glow-amber px-6 py-3 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-200">
-            Fund Escrow (Payable)
+        <div class="flex items-center gap-3 w-full sm:w-auto sm:mt-5">
+          <button id="btnCreateAndFund" ${disabledCreate?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 w-full sm:w-auto">
+            ${disabledCreate ? "✓ Case Funded & Active" : "🚀 Create & Fund Escrow (1-Click)"}
+          </button>
+          <button id="btnConnectCase" class="btn px-4 py-3 rounded-xl bg-slate-800/80 border border-slate-700 text-cyan-300 text-xs hover:bg-slate-700/80 whitespace-nowrap">
+            🔗 Sync Case
           </button>
         </div>
       </div>
@@ -1474,7 +1439,6 @@ function renderCourtTab(){
   const auditScore = state.auditReport && state.auditReport.total_score !== undefined ? Number(state.auditReport.total_score) : (isAccepted ? 100 : (isDisputed ? 0 : 100));
   const defaultProviderPercent = isDisputed ? 0 : auditScore;
 
-  // Extract passed and failed requirements from smart contract audit report JSON
   const passedReqs = state.auditReport && state.auditReport.passed_requirements ? state.auditReport.passed_requirements : [];
   const failedReqsObj = state.auditReport && state.auditReport.failed_requirements ? state.auditReport.failed_requirements : [];
 
@@ -1501,9 +1465,7 @@ function renderCourtTab(){
           </div>
         </div>
 
-        <!-- Detailed Audit Breakdown Section -->
         <div class="grid md:grid-cols-2 gap-4">
-          <!-- Passed Requirements (Green / Checkmark) -->
           <div class="glass p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
             <h3 class="font-display text-xs font-600 text-emerald-300 uppercase tracking-wider flex items-center gap-2">
               <span>✅ Passed Standards (${passedReqs.length})</span>
@@ -1521,7 +1483,6 @@ function renderCourtTab(){
             </div>
           </div>
 
-          <!-- Failed / Violated Requirements (Red / Cross with Developer Fix Reasons) -->
           <div class="glass p-4 rounded-xl border border-red-500/30 bg-red-500/5 space-y-3">
             <h3 class="font-display text-xs font-600 text-red-300 uppercase tracking-wider flex items-center gap-2">
               <span>❌ Violated / Missing Standards (${failedReqsObj.length})</span>
@@ -1677,12 +1638,41 @@ function bindTabEvents(){
   if(state.activeTab === "buyer"){
     byId("inpCaseId")?.addEventListener("input", e => { state.caseId = e.target.value; });
     byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
-    byId("btnCreateCase")?.addEventListener("click", createCase);
-    byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
-    byId("btnFundCase")?.addEventListener("click", () => {
-      const amt = Number(byId("inpFundAmount").value);
-      fundCase(amt);
+    
+    // Bind requirement checkboxes
+    document.querySelectorAll("input[data-req-id]").forEach(chk => {
+      chk.addEventListener("change", e => {
+        const reqId = e.target.getAttribute("data-req-id");
+        if (e.target.checked) {
+          if (!state.selectedReqs.includes(reqId)) state.selectedReqs.push(reqId);
+        } else {
+          state.selectedReqs = state.selectedReqs.filter(id => id !== reqId);
+        }
+      });
     });
+
+    // Add custom rule binding
+    byId("btnAddCustomRule")?.addEventListener("click", () => {
+      const val = byId("inpCustomRule")?.value.trim();
+      if (val) {
+        state.customReqs.push(val);
+        renderAll();
+        showToast("Custom rule added!");
+      }
+    });
+
+    // Remove custom rule bindings
+    document.querySelectorAll("button[data-del-custom]").forEach(btn => {
+      btn.addEventListener("click", e => {
+        const idx = Number(e.target.getAttribute("data-del-custom"));
+        state.customReqs.splice(idx, 1);
+        renderAll();
+        showToast("Custom rule removed.");
+      });
+    });
+
+    byId("btnCreateAndFund")?.addEventListener("click", createAndFundCase);
+    byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
   }
 
   if(state.activeTab === "provider"){
