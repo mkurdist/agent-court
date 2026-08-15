@@ -64,7 +64,7 @@
   body.light-mode .bg-slate-900\/40 { background-color: rgba(241,245,249,0.8) !important; }
   body.light-mode .bg-slate-800 { background-color: #cbd5e1 !important; color: #1e293b !important; }
   body.light-mode .border-slate-700 { border-color: #cbd5e1 !important; }
-  
+
   .font-display{font-family:'Space Grotesk',ui-sans-serif,sans-serif;}
   .font-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
   .glass{
@@ -178,7 +178,7 @@
         <p class="text-[13px] text-slate-400 mt-1">Trustless dispute resolution &amp; settlement for autonomous agents — running on GenLayer network</p>
       </div>
     </div>
-    
+
     <div class="flex items-center gap-3 self-start lg:self-auto flex-wrap">
       <div id="netStatus" class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
         <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
@@ -370,6 +370,7 @@ async function getContractAddress() {
     }
   } catch (err) {
     console.warn("Registry contract sync failed, using fallback address.", err);
+    showToast("Registry lookup failed — using fallback contract address. Verify it's correct before funding.", "error");
   }
   return "0xebebaB69597F8E9E8D4DFE2eb0Fa055f47355966";
 }
@@ -380,6 +381,38 @@ function getClient() {
     chain: studionet,
     account: walletAddr ? walletAddr : undefined,
   });
+}
+
+// FIX: safe wei <-> GEN conversion helpers. Escrow amounts are BigInt with 18
+// decimals; converting straight to a JS Number (as the original code did) loses
+// precision once values exceed Number.MAX_SAFE_INTEGER. These keep everything in
+// BigInt / string form until final display.
+function weiToGenString(weiValue) {
+  let wei;
+  try { wei = BigInt(weiValue); } catch (e) { return "0"; }
+  const base = 10n ** 18n;
+  const whole = wei / base;
+  const frac = wei % base;
+  if (frac === 0n) return whole.toString();
+  let fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+  return `${whole.toString()}.${fracStr}`;
+}
+
+function weiToGenNumber(weiValue) {
+  return Number(weiToGenString(weiValue));
+}
+
+function genAmountToWei(amountInput) {
+  const str = String(amountInput ?? "0").trim();
+  if (!str || isNaN(Number(str)) || Number(str) <= 0) return null;
+  const [wholePartRaw, fracPartRaw = ""] = str.split(".");
+  const wholePart = wholePartRaw || "0";
+  const fracPart = (fracPartRaw + "0".repeat(18)).slice(0, 18);
+  try {
+    return BigInt(wholePart) * (10n ** 18n) + BigInt(fracPart || "0");
+  } catch (e) {
+    return null;
+  }
 }
 
 const STATE_FLOW = ["DRAFT","ACTIVE","SUBMITTED","ADJUDICATING","ACCEPTED_DISPUTED","APPEALED","FINALIZED","SETTLED"];
@@ -469,7 +502,7 @@ let state = {
 window.state = state;
 
 function escapeHtml(s){
-  if (!s) return '';
+  if (s === undefined || s === null) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
@@ -527,7 +560,7 @@ async function fetchUserCases(walletAddress) {
     if (casesStr && typeof casesStr === 'string' && casesStr.trim() !== "") {
       const caseIds = casesStr.split(",").map(c => c.trim()).filter(Boolean);
       state.userCasesList = caseIds;
-      
+
       // Fetch details (title & state) for each case to display in dropdown
       for (const cid of caseIds) {
         try {
@@ -596,19 +629,27 @@ async function fetchOnChainHistory() {
         args: [state.caseId],
       }).catch(() => "");
 
+      // FIX: fully restore the agreement (requirements included) from on-chain JSON
+      // instead of always falling back to DEFAULT_AGREEMENT. Previously, a case
+      // created with a custom subset of requirements would display the wrong
+      // requirement list ("Passed/Failed Standards") once reloaded or synced from
+      // another session.
       if (caseJsonStr) {
         try {
           const parsed = JSON.parse(caseJsonStr);
           if (parsed.project_title) state.projectTitle = parsed.project_title;
+          if (Array.isArray(parsed.requirements) && parsed.requirements.length > 0) {
+            state.agreement = parsed;
+          }
         } catch(e){}
       }
 
       state.caseState = formattedState;
       state.caseCreated = formattedState !== "DRAFT" || Number(escrowVal) > 0;
-      if (Number(escrowVal) > 0) {
-        state.escrowBalance = Number(escrowVal) / 10**18;
+      if (escrowVal && BigInt(escrowVal) > 0n) {
+        state.escrowBalance = weiToGenNumber(escrowVal);
       }
-      
+
       if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formattedState)) {
         const auditRes = await client.readContract({
           address: contractAddress,
@@ -698,10 +739,10 @@ function showToast(message, type = "success") {
   const toast = document.createElement("div");
   const borderColor = type === "success" ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200" : "border-red-500/50 bg-red-500/10 text-red-200";
   const icon = type === "success" ? "✓" : "✕";
-  
+
   toast.className = `glass px-4 py-3 rounded-xl border ${borderColor} font-mono text-xs flex items-center gap-3 shadow-2xl pointer-events-auto fade-up`;
   toast.innerHTML = `<span class="font-bold">${icon}</span> <span>${escapeHtml(message)}</span>`;
-  
+
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = "0";
@@ -736,7 +777,7 @@ function updateWorkflowStepper() {
   const step3 = document.getElementById("stepCard3");
   const step4 = document.getElementById("stepCard4");
   const hintBadge = document.getElementById("stepperHintBadge");
-  
+
   if(!step1 || !step2 || !step3 || !step4) return;
 
   [step1, step2, step3, step4].forEach((el, idx) => {
@@ -866,14 +907,24 @@ async function createAndFundCase(){
   if(!contractAddress){ showToast("Contract Address is missing", "error"); return; }
   if(!state.caseId.trim()){ showToast("Case ID is required", "error"); return; }
   if(!state.providerAddress.trim()){ showToast("Provider address is required", "error"); return; }
-  
-  const fundAmount = Number(document.getElementById("inpFundAmount")?.value || 500);
-  if(isNaN(fundAmount) || fundAmount <= 0){ showToast("Valid escrow amount required", "error"); return; }
+  if(!state.buyerAddress){ showToast("Please connect your Web3 wallet first!", "error"); return; }
+  // FIX: guard against creating a case against yourself, matching the new contract assertion.
+  if(state.providerAddress.trim().toLowerCase() === state.buyerAddress.trim().toLowerCase()){
+    showToast("Provider address must be different from your connected wallet", "error");
+    return;
+  }
+
+  const fundAmountRaw = document.getElementById("inpFundAmount")?.value || "500";
+  // FIX: support decimal GEN amounts safely and avoid BigInt() throwing on non-integer strings.
+  const amountWei = genAmountToWei(fundAmountRaw);
+  if(amountWei === null || amountWei <= 0n){ showToast("Valid escrow amount required", "error"); return; }
 
   const activeReqs = DEFAULT_AGREEMENT.requirements.filter(r => state.selectedReqs.includes(r.id));
   state.customReqs.forEach((cr, idx) => {
     activeReqs.push({ id: `C${idx+1}`, description: cr, weight: 5 });
   });
+
+  if(activeReqs.length === 0){ showToast("Select at least one requirement or add a custom rule", "error"); return; }
 
   const totalWeight = activeReqs.reduce((sum, r) => sum + r.weight, 0);
   if (totalWeight > 0) {
@@ -889,26 +940,27 @@ async function createAndFundCase(){
   state.agreement = finalAgreement;
 
   try {
-    showLoadingOverlay("Creating & Funding Escrow", `Registering case "${state.projectTitle}" & locking ${fundAmount} GEN...`);
+    showLoadingOverlay("Creating & Funding Escrow", `Registering case "${escapeHtml(state.projectTitle)}" & locking ${fundAmountRaw} GEN...`);
     const client = getClient();
-    const amountWei = BigInt(fundAmount) * 10n ** 18n; 
 
     const txHash = await client.writeContract({
       address: contractAddress,
       functionName: "create_and_fund_case",
       args: [state.caseId, JSON.stringify(finalAgreement), state.providerAddress],
-      value: amountWei, 
+      value: amountWei,
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
+    // FIX: added an explicit timeout so this call can't hang forever (matches the
+    // other write calls elsewhere in the app).
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseCreated = true;
     state.caseState = "ACTIVE";
-    state.escrowBalance = fundAmount;
+    state.escrowBalance = Number(fundAmountRaw);
     saveCaseToHistory();
     hideLoadingOverlay();
     showToast("Case created and funded successfully!");
-    
+
     if (state.buyerAddress) await fetchUserCases(state.buyerAddress);
     renderAll();
   } catch(err) {
@@ -934,12 +986,11 @@ async function connectToExistingCase() {
   }
 }
 
-// Added missing submitDelivery function to fix the Uncaught ReferenceError
 async function submitDelivery(){
   const contractAddress = await getContractAddress();
   if(!contractAddress){ showToast("Contract Address is missing", "error"); return; }
   if(state.caseState !== "ACTIVE"){ showToast("Case is not ACTIVE", "error"); return; }
-  
+
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
   if (connectedWallet && state.providerAddress && connectedWallet !== state.providerAddress.trim().toLowerCase()) {
     showToast("Error: You must switch to the Provider wallet address to submit delivery!", "error");
@@ -962,7 +1013,8 @@ async function submitDelivery(){
       args: [state.caseId, evidencePackage],
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
+    // FIX: added an explicit timeout (previously missing, unlike the other write calls).
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseState = "SUBMITTED";
     saveCaseToHistory();
@@ -1038,14 +1090,29 @@ async function requestAdjudication(){
 async function raiseAppeal() {
   const contractAddress = await getContractAddress();
   if(!contractAddress || !state.appealJustification.trim()) {
-    alert("Please enter appeal justification.");
+    showToast("Please enter appeal justification.", "error");
     return;
   }
 
   try {
-    showLoadingOverlay("Running Re-consensus", "Submitting decentralized appeal...");
+    showLoadingOverlay("Recording Appeal", "Submitting appeal justification on-chain...");
     const client = getClient();
+
+    // FIX: previously this skipped straight to request_adjudication, which the old
+    // contract always rejected from a post-verdict state ("Case must be submitted
+    // for adjudication"). Now raise_appeal() is called first (moves state to
+    // APPEALED and records the justification), and the fixed contract accepts
+    // APPEALED as a valid starting state for request_adjudication.
+    const appealTxHash = await client.writeContract({
+      address: contractAddress,
+      functionName: "raise_appeal",
+      args: [state.caseId, state.appealJustification],
+    });
+    await client.waitForTransactionReceipt({ hash: appealTxHash, waitUntil: "finalized", timeout: 120000 });
+
     state.caseState = "APPEALED";
+    renderAll();
+    showLoadingOverlay("Running Re-Audit", "Submitting decentralized re-adjudication...");
 
     const txHash = await client.writeContract({
       address: contractAddress,
@@ -1054,6 +1121,12 @@ async function raiseAppeal() {
     });
 
     await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+
+    const verdictResult = await client.readContract({
+      address: contractAddress,
+      functionName: "get_adjudication_result",
+      args: [state.caseId],
+    });
 
     const auditRes = await client.readContract({
       address: contractAddress,
@@ -1068,22 +1141,31 @@ async function raiseAppeal() {
       }
     } catch(e){}
 
-    state.caseState = "ACCEPTED";
-    state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
+    const verdict = String(verdictResult || "DISPUTED");
+    state.caseState = verdict;
+    state.consensus = { verdict, rate: 1.0 };
+    state.appealJustification = "";
     saveCaseToHistory();
     hideLoadingOverlay();
-    showToast("Appeal processed successfully!");
+    showToast(`Appeal processed! New verdict: ${verdict}`);
     renderAll();
   } catch(err) {
     hideLoadingOverlay();
     showToast(`Appeal failed: ${err.message}`, "error");
+    renderAll();
   }
 }
 
 async function finalizeSettlement(percent){
   const contractAddress = await getContractAddress();
   if(!contractAddress) return;
-  
+
+  // FIX: only the buyer may finalize the settlement (matches the new contract
+  // access control) — fail fast in the UI with a clear message instead of
+  // sending a transaction guaranteed to revert.
+  const connectedWallet = state.buyerAddress ? state.buyerAddress.trim() : "";
+  if(!connectedWallet){ showToast("Please connect your Web3 wallet first!", "error"); return; }
+
   try {
     showLoadingOverlay("Finalizing Settlement", `Registering payout (${percent}%) on-chain...`);
     const client = getClient();
@@ -1138,14 +1220,45 @@ async function settleCase(){
   }
 }
 
+// FIX (new): lets the buyer reclaim escrow if the provider never delivers past
+// the agreement's deadline. Calls the new claim_refund_after_deadline contract
+// function.
+async function claimRefund(){
+  const contractAddress = await getContractAddress();
+  if(!contractAddress) return;
+
+  try {
+    showLoadingOverlay("Claiming Refund", "Requesting deadline-based refund on-chain...");
+    const client = getClient();
+
+    const txHash = await client.writeContract({
+      address: contractAddress,
+      functionName: "claim_refund_after_deadline",
+      args: [state.caseId],
+    });
+
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+
+    state.caseState = "SETTLED";
+    state.settlementAmount = 0;
+    saveCaseToHistory();
+    hideLoadingOverlay();
+    showToast("Refund claimed — escrow returned to buyer.");
+    renderAll();
+  } catch(err) {
+    hideLoadingOverlay();
+    showToast(`Refund claim failed: ${err.message}`, "error");
+  }
+}
+
 function resetCase(){
   state = {
     ...state,
     caseId: generateUniqueCaseId(), // Generate fresh unique ID for new case
     projectTitle: "New Project",
-    caseCreated: false, 
-    caseState: "DRAFT", 
-    escrowBalance: 0, 
+    caseCreated: false,
+    caseState: "DRAFT",
+    escrowBalance: 0,
     evidence: {githubUrl:"", apiUrl:"", notes:""},
     auditReport: null,
     consensus: null,
@@ -1178,8 +1291,8 @@ function renderCaseSelectorBar() {
           ${state.userCasesList.map(id => {
             const info = state.caseDetailsCache[id] || { title: id, state: 'ACTIVE' };
             return `
-              <option value="${id}" ${id === state.caseId ? 'selected' : ''}>
-                📌 ${info.title} [${id}] — (${info.state})
+              <option value="${escapeHtml(id)}" ${id === state.caseId ? 'selected' : ''}>
+                📌 ${escapeHtml(info.title)} [${escapeHtml(id)}] — (${escapeHtml(info.state)})
               </option>
             `;
           }).join("")}
@@ -1250,12 +1363,12 @@ function renderCaseSummary(){
   const [cls,label] = badgeForState();
   el.innerHTML = `
     <div class="flex justify-between"><span class="text-slate-500">project_title</span><span class="text-amber-200 font-bold truncate max-w-[160px]">${escapeHtml(state.projectTitle)}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">case_id</span><span class="text-cyan-300">${state.caseId}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">case_id</span><span class="text-cyan-300">${escapeHtml(state.caseId)}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">state</span><span class="px-2 py-0.5 rounded ${cls} text-[11px]">${label}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${state.buyerAddress ? state.buyerAddress.slice(0,6)+'...'+state.buyerAddress.slice(-4) : "Not connected"}</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">provider</span><span>${state.providerAddress ? state.providerAddress.slice(0,6)+'...'+state.providerAddress.slice(-4) : "—"}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${state.buyerAddress ? escapeHtml(state.buyerAddress.slice(0,6)+'...'+state.buyerAddress.slice(-4)) : "Not connected"}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">provider</span><span>${state.providerAddress ? escapeHtml(state.providerAddress.slice(0,6)+'...'+state.providerAddress.slice(-4)) : "—"}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">escrow</span><span class="text-amber-300">${state.escrowBalance} GEN</span></div>
-    <div class="flex justify-between"><span class="text-slate-500">verdict</span><span>${state.consensus ? state.consensus.verdict : "—"}</span></div>
+    <div class="flex justify-between"><span class="text-slate-500">verdict</span><span>${state.consensus ? escapeHtml(state.consensus.verdict) : "—"}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">settlement</span><span class="text-emerald-300">${state.settlementAmount !== null ? state.settlementAmount + " GEN" : "—"}</span></div>
   `;
 }
@@ -1284,7 +1397,10 @@ function renderLog(){
 function currentDisplayScore(){
   if(state.auditReport && state.auditReport.total_score !== undefined) return Number(state.auditReport.total_score);
   if(state.overridePercent !== null && state.overridePercent !== undefined) return state.overridePercent;
-  return 100;
+  // FIX: previously defaulted to 100 before any verdict existed, which visually
+  // tipped the scale toward "Accepted" for a case that hasn't been judged yet.
+  // A neutral midpoint is a more honest default when there's no consensus.
+  return 50;
 }
 
 function renderScale(){
@@ -1325,6 +1441,12 @@ function renderScale(){
 
 function renderBuyerTab(){
   const disabledCreate = state.caseCreated;
+  // FIX: only the buyer can claim a post-deadline refund, and only while the
+  // case is funded but stuck in ACTIVE (provider never submitted delivery).
+  const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
+  const isBuyerOfCase = !connectedWallet || connectedWallet === (state.buyerAddress || "").trim().toLowerCase();
+  const showRefundClaim = disabledCreate && state.caseState === "ACTIVE" && isBuyerOfCase;
+
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
       <div class="flex items-center justify-between flex-wrap gap-2">
@@ -1342,11 +1464,11 @@ function renderBuyerTab(){
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Unique Case ID (Auto-Generated)</label>
-          <input id="inpCaseId" value="${state.caseId}" disabled class="w-full rounded-lg px-3 py-2 opacity-60 font-mono text-cyan-300" />
+          <input id="inpCaseId" value="${escapeHtml(state.caseId)}" disabled class="w-full rounded-lg px-3 py-2 opacity-60 font-mono text-cyan-300" />
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Provider Address</label>
-          <input id="inpProvider" value="${state.providerAddress}" placeholder="0x..." ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
+          <input id="inpProvider" value="${escapeHtml(state.providerAddress)}" placeholder="0x..." ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
         </div>
       </div>
 
@@ -1363,8 +1485,8 @@ function renderBuyerTab(){
             return `
               <label class="flex items-center justify-between px-3 py-2.5 text-sm hover:bg-slate-800/40 cursor-pointer transition-colors">
                 <div class="flex items-center gap-2.5">
-                  <input type="checkbox" data-req-id="${r.id}" ${checked ? 'checked' : ''} ${disabledCreate?'disabled':''} class="checkbox-req w-4 h-4 rounded" />
-                  <span class="text-slate-300 text-xs"><strong class="text-cyan-400 font-mono mr-1">${r.id}:</strong> ${r.description}</span>
+                  <input type="checkbox" data-req-id="${escapeHtml(r.id)}" ${checked ? 'checked' : ''} ${disabledCreate?'disabled':''} class="checkbox-req w-4 h-4 rounded" />
+                  <span class="text-slate-300 text-xs"><strong class="text-cyan-400 font-mono mr-1">${escapeHtml(r.id)}:</strong> ${escapeHtml(r.description)}</span>
                 </div>
                 <span class="font-mono text-[11px] text-amber-300 shrink-0 ml-2">${r.weight}%</span>
               </label>
@@ -1400,9 +1522,9 @@ function renderBuyerTab(){
       <div class="border-t border-slate-700/50 pt-5 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div class="w-full sm:w-auto">
           <label class="text-xs text-slate-400 mb-1 block">Escrow Amount (GEN)</label>
-          <input id="inpFundAmount" type="number" min="1" value="500" ${disabledCreate?'disabled':''} class="rounded-lg px-3 py-2 w-full sm:w-48 ${disabledCreate?'opacity-60':''}" />
+          <input id="inpFundAmount" type="number" min="0" step="0.000001" value="500" ${disabledCreate?'disabled':''} class="rounded-lg px-3 py-2 w-full sm:w-48 ${disabledCreate?'opacity-60':''}" />
         </div>
-        <div class="flex items-center gap-3 w-full sm:w-auto sm:mt-5">
+        <div class="flex items-center gap-3 w-full sm:w-auto sm:mt-5 flex-wrap">
           <button id="btnCreateAndFund" ${disabledCreate?'disabled':''} class="btn glow-cyan px-6 py-3 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 w-full sm:w-auto">
             ${disabledCreate ? "✓ Case Funded & Active" : "🚀 Create & Fund Escrow (1-Click)"}
           </button>
@@ -1412,6 +1534,17 @@ function renderBuyerTab(){
           ${disabledCreate ? `<button id="btnNewCase" class="btn px-4 py-3 rounded-xl bg-violet-500/20 border border-violet-400/50 text-violet-200 text-xs whitespace-nowrap">➕ New Case</button>` : ''}
         </div>
       </div>
+
+      ${showRefundClaim ? `
+        <div class="border-t border-slate-700/50 pt-5 space-y-2">
+          <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs font-mono">
+            ⏳ If the provider hasn't submitted delivery and the agreement's deadline has passed, you can reclaim your escrow.
+          </div>
+          <button id="btnClaimRefund" class="btn px-5 py-2.5 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-100 text-xs">
+            Claim Refund (Deadline Passed)
+          </button>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -1437,17 +1570,17 @@ function renderProviderTab(){
       <div class="grid md:grid-cols-2 gap-4">
         <div>
           <label class="text-xs text-slate-400 mb-1 block">GitHub repository URL / Raw Document URL</label>
-          <input id="inpGithub" value="${state.evidence.githubUrl}" placeholder="https://raw.githubusercontent.com/.../README_mismatch.md" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
+          <input id="inpGithub" value="${escapeHtml(state.evidence.githubUrl)}" placeholder="https://raw.githubusercontent.com/.../README_mismatch.md" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Live API URL</label>
-          <input id="inpApiUrl" value="${state.evidence.apiUrl}" placeholder="https://api.yourservice.dev" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
+          <input id="inpApiUrl" value="${escapeHtml(state.evidence.apiUrl)}" placeholder="https://api.yourservice.dev" class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''} />
         </div>
       </div>
 
       <div>
         <label class="text-xs text-slate-400 mb-1 block">Delivery notes</label>
-        <textarea id="inpNotes" rows="5" placeholder="Description of the implemented solution..." class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''}>${state.evidence.notes}</textarea>
+        <textarea id="inpNotes" rows="5" placeholder="Description of the implemented solution..." class="w-full rounded-lg px-3 py-2" ${disabled?'disabled':''}>${escapeHtml(state.evidence.notes)}</textarea>
       </div>
 
       <button id="btnSubmitDelivery" ${(!isProviderActive)?'disabled':''} class="btn glow-violet px-6 py-3 rounded-xl bg-violet-500/15 border border-violet-400/40 text-violet-200">
@@ -1464,6 +1597,12 @@ function renderCourtTab(){
   const isAccepted = state.caseState === "ACCEPTED";
   const canFinalize = inConsensus || state.caseState === "APPEALED";
   const canSettle = state.caseState === "FINALIZED";
+
+  // FIX: only the connected buyer may finalize the settlement — mirrors the new
+  // contract-level access control so the UI doesn't offer a button that will
+  // just revert for anyone else.
+  const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
+  const isBuyerConnected = !!connectedWallet;
 
   const totalEscrow = Number(state.escrowBalance) || 500;
   const auditScore = state.auditReport && state.auditReport.total_score !== undefined ? Number(state.auditReport.total_score) : (isAccepted ? 100 : (isDisputed ? 0 : 100));
@@ -1488,7 +1627,7 @@ function renderCourtTab(){
         <div class="rounded-xl border ${isAccepted?'border-emerald-500/40 bg-emerald-500/10':'border-red-500/40 bg-red-500/10'} p-4 flex items-center justify-between flex-wrap gap-3 shadow-lg">
           <div>
             <div class="font-mono text-xs text-slate-400 mb-1">Audit Verdict Result</div>
-            <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${state.consensus.verdict}</div>
+            <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${escapeHtml(state.consensus.verdict)}</div>
           </div>
           <div class="text-right font-mono text-xs text-slate-300">
             Earned Code Quality Score: <span class="${isAccepted?'text-emerald-400':'text-red-400'} font-bold text-base">${auditScore}%</span>
@@ -1505,7 +1644,7 @@ function renderCourtTab(){
                 const reqItem = state.agreement.requirements.find(r => r.id === rId);
                 return `
                   <div class="flex items-center justify-between bg-emerald-950/30 p-2 rounded border border-emerald-500/20 text-emerald-200">
-                    <span><strong class="text-emerald-400 mr-1">${rId}:</strong> ${reqItem ? reqItem.description : 'Standard ' + rId}</span>
+                    <span><strong class="text-emerald-400 mr-1">${escapeHtml(rId)}:</strong> ${escapeHtml(reqItem ? reqItem.description : 'Standard ' + rId)}</span>
                     <span class="text-emerald-400">✓ Pass</span>
                   </div>
                 `;
@@ -1523,9 +1662,9 @@ function renderCourtTab(){
                 return `
                   <div class="bg-red-950/30 p-2.5 rounded border border-red-500/20 text-red-200 space-y-1">
                     <div class="flex justify-between font-bold">
-                      <span class="text-red-400">${f.id} Violation</span>
+                      <span class="text-red-400">${escapeHtml(f.id)} Violation</span>
                     </div>
-                    <div class="text-[11px] text-slate-300">${reqItem ? reqItem.description : ''}</div>
+                    <div class="text-[11px] text-slate-300">${escapeHtml(reqItem ? reqItem.description : '')}</div>
                     <div class="text-[11px] text-amber-300 bg-red-950/60 p-1.5 rounded border border-red-500/30 mt-1">
                       💡 <strong>Auditor Reason:</strong> ${escapeHtml(f.reason)}
                     </div>
@@ -1541,7 +1680,7 @@ function renderCourtTab(){
         <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
           <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Audit Disputed — Request Re-evaluation</h3>
           <p class="text-xs text-slate-300">The code auditor identified gaps. Address the reasons above in your repository, then submit appeal justification for re-auditing.</p>
-          <textarea id="inpAppealJustification" rows="3" placeholder="Provide justification or repository fix references..." class="w-full rounded-lg px-3 py-2">${state.appealJustification || ''}</textarea>
+          <textarea id="inpAppealJustification" rows="3" placeholder="Provide justification or repository fix references..." class="w-full rounded-lg px-3 py-2">${escapeHtml(state.appealJustification || '')}</textarea>
           <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
             Submit Appeal &amp; Re-run Code Audit
           </button>
@@ -1557,6 +1696,12 @@ function renderCourtTab(){
             </span>
           </div>
 
+          ${!isBuyerConnected ? `
+            <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 font-mono text-xs">
+              ⚠️ Only the buyer's connected wallet can finalize and settle this case.
+            </div>
+          ` : ''}
+
           <div class="glass p-4 rounded-xl border border-slate-700/60 space-y-4">
             <div class="grid grid-cols-2 gap-4 text-xs font-mono">
               <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
@@ -1571,10 +1716,10 @@ function renderCourtTab(){
 
             <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <div class="flex items-center gap-2">
-                <input id="inpPercent" type="number" min="0" max="100" value="${defaultProviderPercent}" ${isDisputed ? 'disabled' : ''} class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300 ${isDisputed ? 'opacity-60' : ''}" />
-                <span class="text-xs text-slate-400 font-mono">% Share to Provider</span>
+                <input id="inpPercent" type="number" min="0" max="${isAccepted ? auditScore : 0}" value="${defaultProviderPercent}" ${isDisputed ? 'disabled' : ''} class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300 ${isDisputed ? 'opacity-60' : ''}" />
+                <span class="text-xs text-slate-400 font-mono">% Share to Provider ${isAccepted ? `(capped at verified score: ${auditScore}%)` : ''}</span>
               </div>
-              <button id="btnFinalize" class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 sm:ml-auto text-xs">
+              <button id="btnFinalize" ${!isBuyerConnected ? 'disabled' : ''} class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 sm:ml-auto text-xs">
                 Calculate &amp; Lock Distribution
               </button>
             </div>
@@ -1619,14 +1764,14 @@ function renderHistoryTab() {
           <div class="glass p-4 rounded-xl border border-slate-700/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <div class="flex items-center gap-2 mb-1">
-                <span class="font-mono text-cyan-300 font-600">${c.caseId}</span>
+                <span class="font-mono text-cyan-300 font-600">${escapeHtml(c.caseId)}</span>
                 <span class="text-amber-200 text-xs font-bold">(${escapeHtml(c.title || 'Project')})</span>
-                <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${c.state}</span>
+                <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(c.state)}</span>
               </div>
-              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? c.provider.slice(0,6)+'...'+c.provider.slice(-4) : '—'}</div>
+              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? escapeHtml(c.provider.slice(0,6)+'...'+c.provider.slice(-4)) : '—'}</div>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-[11px] font-mono text-slate-500">[${c.time}]</span>
+              <span class="text-[11px] font-mono text-slate-500">[${escapeHtml(c.time)}]</span>
               <a href="https://explorer-studio.genlayer.com" target="_blank" class="btn px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs">
                 Explorer ↗
               </a>
@@ -1669,7 +1814,7 @@ function bindTabEvents(){
   if(state.activeTab === "buyer"){
     byId("inpProjectTitle")?.addEventListener("input", e => { state.projectTitle = e.target.value; });
     byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
-    
+
     document.querySelectorAll("input[data-req-id]").forEach(chk => {
       chk.addEventListener("change", e => {
         const reqId = e.target.getAttribute("data-req-id");
@@ -1702,6 +1847,7 @@ function bindTabEvents(){
     byId("btnCreateAndFund")?.addEventListener("click", createAndFundCase);
     byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
     byId("btnNewCase")?.addEventListener("click", resetCase);
+    byId("btnClaimRefund")?.addEventListener("click", claimRefund);
   }
 
   if(state.activeTab === "provider"){
@@ -1715,13 +1861,13 @@ function bindTabEvents(){
     byId("btnAdjudicate")?.addEventListener("click", requestAdjudication);
     byId("inpAppealJustification")?.addEventListener("input", e => { state.appealJustification = e.target.value; });
     byId("btnAppeal")?.addEventListener("click", raiseAppeal);
-    
+
     byId("inpPercent")?.addEventListener("input", e => {
       const p = Math.max(0, Math.min(100, Number(e.target.value) || 0));
       const total = Number(state.escrowBalance) || 500;
       const provAmt = (total * p) / 100;
       const buyAmt = total - provAmt;
-      
+
       const provEl = document.getElementById("providerPayoutPreview");
       const buyEl = document.getElementById("buyerRefundPreview");
       if(provEl) provEl.textContent = provAmt + " GEN";
