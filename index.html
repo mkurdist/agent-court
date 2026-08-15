@@ -92,19 +92,19 @@
   .btn:active:not(:disabled){transform:translateY(0px) scale(.98);}
   .btn:disabled{opacity:.35;cursor:not-allowed;}
   .tab-btn{transition:all .2s ease;}
-  input,textarea{
+  input,textarea,select{
     background:rgba(7,11,20,0.55);
     border:1px solid rgba(148,163,184,0.18);
     color:var(--ink);
     font-family:'IBM Plex Mono',monospace;
     font-size:13px;
   }
-  body.light-mode input, body.light-mode textarea{
+  body.light-mode input, body.light-mode textarea, body.light-mode select{
     background:rgba(255,255,255,0.95);
     border:1px solid rgba(148,163,184,0.4);
     color:#0f172a;
   }
-  input:focus,textarea:focus{
+  input:focus,textarea:focus,select:focus{
     outline:none; border-color:rgba(34,211,238,0.55);
     box-shadow:0 0 0 3px rgba(34,211,238,0.12);
   }
@@ -139,12 +139,6 @@
   .state-line{transition:all .5s ease;}
 
   .checkbox-req{accent-color:#22d3ee;}
-
-  code.inline{
-    font-family:'IBM Plex Mono',monospace;
-    background:rgba(148,163,184,.1);
-    padding:1px 6px;border-radius:4px;font-size:12px;color:#67e8f9;
-  }
 </style>
 </head>
 <body class="antialiased">
@@ -238,7 +232,7 @@
     </span>
   </div>
 
-  <!-- Dynamic Multi-Case Selector Bar -->
+  <!-- Glass Dropdown Bar for Multi-Case Sync & Details -->
   <div id="dynamicCaseSelectorContainer"></div>
 
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
@@ -250,7 +244,7 @@
       <span class="font-display text-xs font-600 text-cyan-300 uppercase tracking-wider flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-cyan-400 pulse-dot"></span> Protocol Workflow Stepper
       </span>
-      <span id="stepperHintBadge" class="font-mono text-xs px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">Step 1: Create & Fund Case On-Chain</span>
+      <span id="stepperHintBadge" class="font-mono text-xs px-3 py-1 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">Step 1: Configure &amp; Fund Case</span>
     </div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
       <div id="stepCard1" class="p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all">
@@ -396,6 +390,7 @@ const STATE_LABELS = {
 
 const DEFAULT_AGREEMENT = {
   case_id: "AC-0001",
+  project_title: "My Custom Project",
   payment: "500 GEN",
   deadline: 1788000000,
   project_scope: "Code and Documentation Verification Challenge",
@@ -437,13 +432,19 @@ const DEFAULT_AGREEMENT = {
   adjudication_directive: "Cross-verify the submitted source code or documentation against these requirements. Provide granular audit results including passed requirements and specific failure reasons."
 };
 
+function generateUniqueCaseId() {
+  return "AC-" + Math.random().toString(36).substring(2, 7).toUpperCase();
+}
+
 let state = {
   activeTab: "buyer",
   agreement: JSON.parse(JSON.stringify(DEFAULT_AGREEMENT)),
-  caseId: DEFAULT_AGREEMENT.case_id,
+  caseId: generateUniqueCaseId(), // Auto-generated unique case ID
+  projectTitle: "My Secure API Project", // Custom title / note field
   buyerAddress: "",
   providerAddress: "",
   userCasesList: [],
+  caseDetailsCache: {}, // Stores title and state for each fetched case
   caseCreated: false,
   caseState: "DRAFT",
   escrowBalance: 0,
@@ -461,8 +462,8 @@ let state = {
   appealed: false,
   caseHistory: [],
   log: [],
-  selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id), // All checked by default
-  customReqs: [] // Array of custom rule descriptions added by buyer
+  selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id),
+  customReqs: []
 };
 
 window.state = state;
@@ -499,6 +500,7 @@ function saveCaseToHistory() {
   if(!existing) {
     state.caseHistory.unshift({
       caseId: state.caseId,
+      title: state.projectTitle,
       state: state.caseState,
       escrow: state.escrowBalance,
       provider: state.providerAddress,
@@ -507,6 +509,7 @@ function saveCaseToHistory() {
   } else {
     existing.state = state.caseState;
     existing.escrow = state.escrowBalance;
+    existing.title = state.projectTitle;
   }
 }
 
@@ -524,18 +527,48 @@ async function fetchUserCases(walletAddress) {
     if (casesStr && typeof casesStr === 'string' && casesStr.trim() !== "") {
       const caseIds = casesStr.split(",").map(c => c.trim()).filter(Boolean);
       state.userCasesList = caseIds;
+      
+      // Fetch details (title & state) for each case to display in dropdown
+      for (const cid of caseIds) {
+        try {
+          const remoteState = await client.readContract({
+            address: contractAddress,
+            functionName: "get_case_state",
+            args: [cid],
+          });
+          const caseJsonStr = await client.readContract({
+            address: contractAddress,
+            functionName: "get_case",
+            args: [cid],
+          });
+          let parsedTitle = cid;
+          if (caseJsonStr) {
+            try {
+              const obj = JSON.parse(caseJsonStr);
+              if (obj.project_title) parsedTitle = obj.project_title;
+            } catch(e){}
+          }
+          state.caseDetailsCache[cid] = {
+            title: parsedTitle,
+            state: remoteState ? remoteState.trim() : "UNKNOWN"
+          };
+        } catch(e) {
+          state.caseDetailsCache[cid] = { title: cid, state: "ACTIVE" };
+        }
+      }
+
       if (caseIds.length > 0) {
         if (!state.caseId || !caseIds.includes(state.caseId)) {
           state.caseId = caseIds[caseIds.length - 1];
         }
-        pushLog(`Auto-discovered ${caseIds.length} cases for wallet. Active case: ${state.caseId}`, "success");
+        pushLog(`Synced ${caseIds.length} cases from blockchain.`, "success");
         await fetchOnChainHistory();
       }
     } else {
       state.userCasesList = [];
     }
   } catch (err) {
-    console.warn("Failed to auto-discover cases for wallet:", err);
+    console.warn("Failed to fetch cases for wallet:", err);
   }
 }
 
@@ -556,6 +589,19 @@ async function fetchOnChainHistory() {
         functionName: "get_escrow_balance",
         args: [state.caseId],
       }).catch(() => 0n);
+
+      const caseJsonStr = await client.readContract({
+        address: contractAddress,
+        functionName: "get_case",
+        args: [state.caseId],
+      }).catch(() => "");
+
+      if (caseJsonStr) {
+        try {
+          const parsed = JSON.parse(caseJsonStr);
+          if (parsed.project_title) state.projectTitle = parsed.project_title;
+        } catch(e){}
+      }
 
       state.caseState = formattedState;
       state.caseCreated = formattedState !== "DRAFT" || Number(escrowVal) > 0;
@@ -581,30 +627,17 @@ async function fetchOnChainHistory() {
         }
       }
 
-      const existingIdx = state.caseHistory.findIndex(c => c.caseId === state.caseId);
-      if (existingIdx === -1) {
-        state.caseHistory.unshift({
-          caseId: state.caseId,
-          state: formattedState,
-          escrow: state.escrowBalance,
-          provider: state.providerAddress || "0x...",
-          time: nowStamp()
-        });
-      } else {
-        state.caseHistory[existingIdx].state = formattedState;
-        state.caseHistory[existingIdx].escrow = state.escrowBalance;
-      }
+      saveCaseToHistory();
     }
   } catch (err) {
-    console.warn("Failed to fetch on-chain history automatically:", err);
+    console.warn("Failed to fetch on-chain history:", err);
   }
 }
 
 async function autoSyncOnWalletConnect(walletAddress) {
   if (!walletAddress) return;
-  pushLog(`Wallet connected: auto-syncing cases for ${walletAddress.slice(0,6)}...`, "info");
+  pushLog(`Wallet connected: syncing cases for ${walletAddress.slice(0,6)}...`, "info");
   await fetchUserCases(walletAddress);
-  await fetchOnChainHistory();
   renderAll();
 }
 
@@ -624,7 +657,7 @@ async function startRealtimePollingLoop() {
       if (latestState && typeof latestState === 'string') {
         const cleanedState = latestState.trim();
         if (cleanedState && cleanedState !== state.caseState) {
-          pushLog(`Polling detected state change: ${state.caseState} -> ${cleanedState}`, "success");
+          pushLog(`State changed: ${state.caseState} -> ${cleanedState}`, "success");
           state.caseState = cleanedState;
           if (["ACCEPTED", "DISPUTED"].includes(cleanedState)) {
             const auditRes = await client.readContract({
@@ -714,7 +747,7 @@ function updateWorkflowStepper() {
   if(!state.caseCreated) {
     step1.className = "p-3 rounded-xl border border-cyan-400/50 bg-cyan-500/10 text-cyan-200 flex items-center gap-2 transition-all glow-cyan";
     step1.querySelector("span").className = "w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px]";
-    if(hintBadge) hintBadge.textContent = "Step 1: Select Rules & Create/Fund Case On-Chain";
+    if(hintBadge) hintBadge.textContent = "Step 1: Configure Custom Title & Fund Escrow";
   } else if(state.caseState === "ACTIVE") {
     step3.className = "p-3 rounded-xl border border-violet-400/50 bg-violet-500/10 text-violet-200 flex items-center gap-2 transition-all glow-violet";
     step3.querySelector("span").className = "w-5 h-5 rounded-full bg-violet-500/20 text-violet-300 flex items-center justify-center font-bold text-[10px]";
@@ -728,7 +761,7 @@ function updateWorkflowStepper() {
 
 async function connectWallet() {
   if (typeof window.ethereum === 'undefined') {
-    pushLog("Wallet error: No Web3 wallet detected (MetaMask or Rabby required).", "error");
+    pushLog("Wallet error: No Web3 wallet detected.", "error");
     showToast("Please install a Web3 wallet in your browser.", "error");
     return;
   }
@@ -738,21 +771,17 @@ async function connectWallet() {
     if(btn) btn.textContent = "Connecting...";
 
     const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    
-    if (!accounts || accounts.length === 0) {
-      throw new Error("No accounts found");
-    }
+    if (!accounts || accounts.length === 0) throw new Error("No accounts found");
 
     const walletAddress = accounts[0];
     updateWalletUI(walletAddress);
-    pushLog(`Wallet connected successfully: ${walletAddress.slice(0, 6)}...`, "success");
+    pushLog(`Wallet connected: ${walletAddress.slice(0, 6)}...`, "success");
     showToast("Wallet connected successfully!");
 
     await autoSyncOnWalletConnect(walletAddress);
-
   } catch (err) {
     console.error("Wallet connection failed:", err);
-    pushLog(`Wallet connection rejected or failed: ${err.message}`, "error");
+    pushLog(`Connection failed: ${err.message}`, "error");
     showToast(`Connection failed: ${err.message}`, "error");
     updateWalletUI(null);
   }
@@ -767,7 +796,6 @@ function disconnectWallet() {
 function updateWalletUI(walletAddress) {
   const container = document.getElementById("walletProfileContainer");
   const dropdown = document.getElementById("accountDropdown");
-  
   if(dropdown) dropdown.classList.add("hidden");
 
   state.buyerAddress = walletAddress || "";
@@ -792,7 +820,6 @@ function updateWalletUI(walletAddress) {
       e.stopPropagation();
       dropdown.classList.toggle("hidden");
     });
-
     const fullAddrEl = document.getElementById("dropdownFullAddress");
     if(fullAddrEl) fullAddrEl.textContent = walletAddress;
   }
@@ -800,9 +827,7 @@ function updateWalletUI(walletAddress) {
 
 window.addEventListener("click", () => {
   const dropdown = document.getElementById("accountDropdown");
-  if(dropdown && !dropdown.classList.contains("hidden")) {
-    dropdown.classList.add("hidden");
-  }
+  if(dropdown && !dropdown.classList.contains("hidden")) dropdown.classList.add("hidden");
 });
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -813,7 +838,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const addr = state.buyerAddress;
     if(addr) {
       navigator.clipboard.writeText(addr);
-      pushLog("Wallet address copied to clipboard.", "success");
       showToast("Address copied to clipboard!");
     }
   });
@@ -826,38 +850,31 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 if (typeof window.ethereum !== 'undefined') {
   window.ethereum.on('accountsChanged', async (accounts) => {
-    if (accounts.length === 0) {
-      disconnectWallet();
-    } else {
+    if (accounts.length === 0) disconnectWallet();
+    else {
       updateWalletUI(accounts[0]);
-      pushLog(`Active account switched to: ${accounts[0].slice(0, 6)}...`, "info");
       showToast("Wallet account switched.");
       await autoSyncOnWalletConnect(accounts[0]);
     }
   });
-
-  window.ethereum.on('chainChanged', (_chainId) => {
-    window.location.reload();
-  });
+  window.ethereum.on('chainChanged', () => window.location.reload());
 }
 
-// Single-step Atomic Create and Fund Transaction
+// Single-step Atomic Create and Fund Transaction with Custom Title
 async function createAndFundCase(){
   const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.caseId || !state.caseId.trim()){ pushLog("error: case_id is required", "error"); showToast("Case ID is required", "error"); return; }
-  if(!state.providerAddress || !state.providerAddress.trim()){ pushLog("error: provider address is required", "error"); showToast("Provider address is required", "error"); return; }
+  if(!contractAddress){ showToast("Contract Address is missing", "error"); return; }
+  if(!state.caseId.trim()){ showToast("Case ID is required", "error"); return; }
+  if(!state.providerAddress.trim()){ showToast("Provider address is required", "error"); return; }
   
   const fundAmount = Number(document.getElementById("inpFundAmount")?.value || 500);
-  if(isNaN(fundAmount) || fundAmount <= 0){ showToast("Valid escrow amount is required", "error"); return; }
+  if(isNaN(fundAmount) || fundAmount <= 0){ showToast("Valid escrow amount required", "error"); return; }
 
-  // Build active requirements list based on checkboxes + custom rules
   const activeReqs = DEFAULT_AGREEMENT.requirements.filter(r => state.selectedReqs.includes(r.id));
   state.customReqs.forEach((cr, idx) => {
     activeReqs.push({ id: `C${idx+1}`, description: cr, weight: 5 });
   });
 
-  // Normalize weights to sum up to 100%
   const totalWeight = activeReqs.reduce((sum, r) => sum + r.weight, 0);
   if (totalWeight > 0) {
     activeReqs.forEach(r => r.weight = Math.round((r.weight / totalWeight) * 100));
@@ -866,15 +883,15 @@ async function createAndFundCase(){
   const finalAgreement = {
     ...DEFAULT_AGREEMENT,
     case_id: state.caseId,
+    project_title: state.projectTitle || "Untitled Project",
     requirements: activeReqs
   };
   state.agreement = finalAgreement;
 
   try {
-    showLoadingOverlay("Creating & Funding Escrow", `Registering case & locking ${fundAmount} GEN in a single atomic transaction...`);
+    showLoadingOverlay("Creating & Funding Escrow", `Registering case "${state.projectTitle}" & locking ${fundAmount} GEN...`);
     const client = getClient();
     const amountWei = BigInt(fundAmount) * 10n ** 18n; 
-    pushLog(`Sending atomic create_and_fund_case for "${state.caseId}" with ${fundAmount} GEN...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
@@ -883,64 +900,48 @@ async function createAndFundCase(){
       value: amountWei, 
     });
 
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-    });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized" });
 
     state.caseCreated = true;
     state.caseState = "ACTIVE";
     state.escrowBalance = fundAmount;
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`create_and_fund_case success! TxHash: ${txHash}`, "success");
-    showToast("Case created and escrow funded successfully in 1 click!");
+    showToast("Case created and funded successfully!");
     
-    if (state.buyerAddress) {
-      await fetchUserCases(state.buyerAddress);
-    }
+    if (state.buyerAddress) await fetchUserCases(state.buyerAddress);
     renderAll();
   } catch(err) {
     console.error(err);
     hideLoadingOverlay();
-    pushLog(`create_and_fund_case failed: ${err.message}`, "error");
     showToast(`Transaction failed: ${err.message}`, "error");
   }
 }
 
 async function connectToExistingCase() {
-  const contractAddress = await getContractAddress();
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim() : "";
-  
-  if(!contractAddress) { showToast("Contract Address is missing", "error"); return; }
   if(!connectedWallet) { showToast("Please connect your Web3 wallet first!", "error"); return; }
 
   try {
-    showLoadingOverlay("Syncing Case", `Syncing case with connected wallet: ${connectedWallet.slice(0,6)}...`);
+    showLoadingOverlay("Syncing Cases", "Retrieving all cases from blockchain for this wallet...");
     await fetchUserCases(connectedWallet);
     hideLoadingOverlay();
-    pushLog(`Successfully synced cases for connected wallet: ${connectedWallet.slice(0,6)}...`, "success");
     showToast("Cases synced successfully!");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Failed to connect to case: ${err.message}`, "error");
-    showToast(`Connection failed: ${err.message}`, "error");
+    showToast(`Sync failed: ${err.message}`, "error");
   }
 }
 
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(state.caseState !== "SUBMITTED"){ pushLog("request_adjudication() error: case must be SUBMITTED", "error"); showToast("Case must be SUBMITTED", "error"); return; }
-  if(state.isAdjudicating) return;
+  if(!contractAddress || state.caseState !== "SUBMITTED" || state.isAdjudicating) return;
 
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
-  showLoadingOverlay("Smart Code Auditor in Progress", "Executing AI auditor nodes & evaluating selected code requirements...");
-  pushLog(`Requesting Smart Code Audit & GenLayer validator consensus on-chain...`, "info");
+  showLoadingOverlay("Smart Code Auditor in Progress", "Evaluating code against selected requirements...");
 
   try {
     const client = getClient();
@@ -952,11 +953,7 @@ async function requestAdjudication(){
       args: [state.caseId, targetUrl],
     });
 
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     const verdictResult = await client.readContract({
       address: contractAddress,
@@ -985,15 +982,12 @@ async function requestAdjudication(){
     state.consensus = { verdict, rate: 1.0 };
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`Smart Code Audit completed! Verdict: ${verdict}. TxHash: ${txHash}`, "success");
     showToast(`Audit completed! Verdict: ${verdict}`);
     renderAll();
   } catch(err) {
-    console.error(err);
     state.isAdjudicating = false;
     state.caseState = "SUBMITTED";
     hideLoadingOverlay();
-    pushLog(`Adjudication failed: ${err.message}`, "error");
     showToast(`Adjudication failed: ${err.message}`, "error");
     renderAll();
   }
@@ -1001,17 +995,15 @@ async function requestAdjudication(){
 
 async function raiseAppeal() {
   const contractAddress = await getContractAddress();
-  if(!contractAddress){ pushLog("request_adjudication() error: Contract Address is missing", "error"); showToast("Contract Address is missing", "error"); return; }
-  if(!state.appealJustification.trim()) {
-    alert("Please enter the appeal justification or supplementary documentation.");
+  if(!contractAddress || !state.appealJustification.trim()) {
+    alert("Please enter appeal justification.");
     return;
   }
 
   try {
-    showLoadingOverlay("Running Validator Re-consensus", "Submitting decentralized appeal & re-evaluating with AI nodes...");
+    showLoadingOverlay("Running Re-consensus", "Submitting decentralized appeal...");
     const client = getClient();
     state.caseState = "APPEALED";
-    pushLog(`Submitting decentralized appeal & re-running validator consensus...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
@@ -1038,13 +1030,10 @@ async function raiseAppeal() {
     state.consensus = { verdict: "ACCEPTED", rate: 1.0 };
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`Validator re-consensus completed after appeal! Verdict updated. TxHash: ${txHash}`, "success");
-    showToast("Appeal processed! Validator consensus updated.");
+    showToast("Appeal processed successfully!");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Appeal failed: ${err.message}`, "error");
     showToast(`Appeal failed: ${err.message}`, "error");
   }
 }
@@ -1054,10 +1043,9 @@ async function finalizeSettlement(percent){
   if(!contractAddress) return;
   
   try {
-    showLoadingOverlay("Finalizing Settlement", `Calculating and registering payout (${percent}%) on-chain...`);
+    showLoadingOverlay("Finalizing Settlement", `Registering payout (${percent}%) on-chain...`);
     const client = getClient();
     const p = Math.max(0, Math.min(100, Number(percent)));
-    pushLog(`Finalizing and calculating settlement (${p}%) on-chain...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
@@ -1065,11 +1053,7 @@ async function finalizeSettlement(percent){
       args: [state.caseId, BigInt(p)],
     });
 
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     const payout = Math.floor((state.escrowBalance * p) / 100);
     state.settlementAmount = payout;
@@ -1077,13 +1061,10 @@ async function finalizeSettlement(percent){
     state.caseState = "FINALIZED";
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`Finalization success! Calculated payout: ${payout} GEN. TxHash: ${txHash}`, "success");
     showToast(`Settlement finalized: ${payout} GEN`);
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Finalization failed: ${err.message}`, "error");
     showToast(`Finalization failed: ${err.message}`, "error");
   }
 }
@@ -1093,9 +1074,8 @@ async function settleCase(){
   if(!contractAddress) return;
 
   try {
-    showLoadingOverlay("Releasing Escrow", "Triggering verdict-bound payout and transferring tokens on-chain...");
+    showLoadingOverlay("Releasing Escrow", "Transferring tokens on-chain...");
     const client = getClient();
-    pushLog(`Triggering verdict-bound payout and releasing escrow on-chain...`, "info");
 
     const txHash = await client.writeContract({
       address: contractAddress,
@@ -1103,22 +1083,15 @@ async function settleCase(){
       args: [state.caseId],
     });
 
-    await client.waitForTransactionReceipt({
-      hash: txHash,
-      waitUntil: "finalized",
-      timeout: 120000,
-    });
+    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseState = "SETTLED";
     saveCaseToHistory();
     hideLoadingOverlay();
-    pushLog(`settle_case success! Funds released to recipient wallets. TxHash: ${txHash}`, "success");
     showToast("Escrow released & case fully settled!");
     renderAll();
   } catch(err) {
-    console.error(err);
     hideLoadingOverlay();
-    pushLog(`Settlement failed: ${err.message}`, "error");
     showToast(`Settlement failed: ${err.message}`, "error");
   }
 }
@@ -1126,23 +1099,27 @@ async function settleCase(){
 function resetCase(){
   state = {
     ...state,
-    caseCreated:false, caseState:"DRAFT", escrowBalance:0, evidence:{githubUrl:"",apiUrl:"",notes:""},
-    sanitizeHits:[], isAdjudicating:false, validators:[], consensus:null, auditReport:null,
-    requirementResults:[], computedScore:null, overridePercent:null,
-    settlementAmount:null, appealJustification:"", appealed:false,
+    caseId: generateUniqueCaseId(), // Generate fresh unique ID for new case
+    projectTitle: "New Project",
+    caseCreated: false, 
+    caseState: "DRAFT", 
+    escrowBalance: 0, 
+    evidence: {githubUrl:"", apiUrl:"", notes:""},
+    auditReport: null,
+    consensus: null,
+    settlementAmount: null,
+    appealJustification: "",
     selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id),
     customReqs: []
   };
-  pushLog(`— case reset —`, "info");
-  showToast("Started new case session.");
+  showToast("Started new case configuration.");
   state.activeTab = "buyer";
   renderAll();
 }
 
-function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
-
 function setTab(t){ state.activeTab = t; renderAll(); }
 
+// Render Glass Dropdown Bar showing All Cases with Custom Title, ID, and State
 function renderCaseSelectorBar() {
   const container = document.getElementById("dynamicCaseSelectorContainer");
   if (!container) return;
@@ -1150,26 +1127,33 @@ function renderCaseSelectorBar() {
     container.innerHTML = "";
     return;
   }
+
   container.innerHTML = `
     <div class="glass rounded-2xl px-6 py-4 mb-6 flex items-center justify-between flex-wrap gap-3 border border-cyan-500/30">
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-cyan-300 font-mono font-600">Active Wallet Cases (${state.userCasesList.length}):</span>
-        <select id="walletCaseDropdown" class="rounded-lg px-3 py-1.5 text-xs font-mono bg-slate-900 text-cyan-200 border border-slate-700">
-          ${state.userCasesList.map(id => `
-            <option value="${id}" ${id === state.caseId ? 'selected' : ''}>Case ID: ${id}</option>
-          `).join("")}
+      <div class="flex items-center gap-3 w-full sm:w-auto">
+        <span class="text-xs text-cyan-300 font-mono font-600">📁 Synced Cases (${state.userCasesList.length}):</span>
+        <select id="walletCaseDropdown" class="rounded-lg px-3 py-2 text-xs font-mono bg-slate-900 text-cyan-200 border border-slate-700 w-full sm:w-72">
+          ${state.userCasesList.map(id => {
+            const info = state.caseDetailsCache[id] || { title: id, state: 'ACTIVE' };
+            return `
+              <option value="${id}" ${id === state.caseId ? 'selected' : ''}>
+                📌 ${info.title} [${id}] — (${info.state})
+              </option>
+            `;
+          }).join("")}
         </select>
       </div>
-      <span class="text-[11px] text-slate-400 font-mono">Switch instantly between your assigned on-chain cases</span>
+      <span class="text-[11px] text-slate-400 font-mono">Select any past or active case to jump straight to its workflow</span>
     </div>
   `;
+
   document.getElementById("walletCaseDropdown")?.addEventListener("change", async (e) => {
     state.caseId = e.target.value;
     showLoadingOverlay("Switching Case", `Loading details for case ${state.caseId}...`);
     await fetchOnChainHistory();
     hideLoadingOverlay();
     renderAll();
-    showToast(`Switched active case to: ${state.caseId}`);
+    showToast(`Switched to case: ${state.caseId}`);
   });
 }
 
@@ -1223,6 +1207,7 @@ function renderCaseSummary(){
   const el = document.getElementById("caseSummary");
   const [cls,label] = badgeForState();
   el.innerHTML = `
+    <div class="flex justify-between"><span class="text-slate-500">project_title</span><span class="text-amber-200 font-bold truncate max-w-[160px]">${escapeHtml(state.projectTitle)}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">case_id</span><span class="text-cyan-300">${state.caseId}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">state</span><span class="px-2 py-0.5 rounded ${cls} text-[11px]">${label}</span></div>
     <div class="flex justify-between"><span class="text-slate-500">buyer</span><span>${state.buyerAddress ? state.buyerAddress.slice(0,6)+'...'+state.buyerAddress.slice(-4) : "Not connected"}</span></div>
@@ -1237,17 +1222,15 @@ function renderLog(){
   const el = document.getElementById("activityLog");
   const colorFor = k => k==="success" ? "text-emerald-300" : k==="error" ? "text-red-300" : k==="warn" ? "text-amber-300" : "text-slate-400";
   if(!state.log.length){
-    el.innerHTML = `<div class="text-slate-600 text-[12px]">No activity yet — create a case to begin.</div>`;
+    el.innerHTML = `<div class="text-slate-600 text-[12px]">No activity yet.</div>`;
     return;
   }
   el.innerHTML = state.log.map(l => {
     let formattedText = escapeHtml(l.text);
-
     formattedText = formattedText.replace(/(0x[a-fA-F0-9]{10,})/g, (hash) => {
       const explorerUrl = `https://explorer-studio.genlayer.com/tx/${hash}`;
-      return `<a href="${explorerUrl}" target="_blank" class="text-cyan-400 underline hover:text-cyan-300 font-mono inline-flex items-center gap-1" title="View on GenLayer Explorer">${hash.slice(0, 10)}... ↗</a>`;
+      return `<a href="${explorerUrl}" target="_blank" class="text-cyan-400 underline hover:text-cyan-300 font-mono inline-flex items-center gap-1">${hash.slice(0, 10)}... ↗</a>`;
     });
-
     return `
       <div class="fade-up border-l-2 border-slate-700 pl-2">
         <span class="text-slate-600">[${l.time}]</span> <span class="${colorFor(l.kind)}">${formattedText}</span>
@@ -1305,15 +1288,19 @@ function renderBuyerTab(){
       <div class="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 class="font-display text-lg font-600 mb-1">Create, Configure &amp; Fund Agreement</h2>
-          <p class="text-sm text-slate-400">Select standards, add custom rules, and lock escrow in 1-click atomic transaction.</p>
+          <p class="text-sm text-slate-400">Set custom project title, auto-generated unique ID, standards, and lock escrow in 1-click.</p>
         </div>
         ${state.caseCreated ? `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">✓ Case Active &amp; Funded</span>` : `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">Step 1: Configure &amp; Fund</span>`}
       </div>
 
-      <div class="grid md:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-3 gap-4">
         <div>
-          <label class="text-xs text-slate-400 mb-1 block">Case ID</label>
-          <input id="inpCaseId" value="${state.caseId}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" />
+          <label class="text-xs text-slate-400 mb-1 block">Project Title / Custom Note</label>
+          <input id="inpProjectTitle" value="${escapeHtml(state.projectTitle)}" ${disabledCreate?'disabled':''} class="w-full rounded-lg px-3 py-2 ${disabledCreate?'opacity-60':''}" placeholder="e.g. DeFi Smart Contract Audit" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Unique Case ID (Auto-Generated)</label>
+          <input id="inpCaseId" value="${state.caseId}" disabled class="w-full rounded-lg px-3 py-2 opacity-60 font-mono text-cyan-300" />
         </div>
         <div>
           <label class="text-xs text-slate-400 mb-1 block">Provider Address</label>
@@ -1380,6 +1367,7 @@ function renderBuyerTab(){
           <button id="btnConnectCase" class="btn px-4 py-3 rounded-xl bg-slate-800/80 border border-slate-700 text-cyan-300 text-xs hover:bg-slate-700/80 whitespace-nowrap">
             🔗 Sync Case
           </button>
+          ${disabledCreate ? `<button id="btnNewCase" class="btn px-4 py-3 rounded-xl bg-violet-500/20 border border-violet-400/50 text-violet-200 text-xs whitespace-nowrap">➕ New Case</button>` : ''}
         </div>
       </div>
     </div>
@@ -1590,6 +1578,7 @@ function renderHistoryTab() {
             <div>
               <div class="flex items-center gap-2 mb-1">
                 <span class="font-mono text-cyan-300 font-600">${c.caseId}</span>
+                <span class="text-amber-200 text-xs font-bold">(${escapeHtml(c.title || 'Project')})</span>
                 <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${c.state}</span>
               </div>
               <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? c.provider.slice(0,6)+'...'+c.provider.slice(-4) : '—'}</div>
@@ -1636,10 +1625,9 @@ function bindTabEvents(){
   const byId = id => document.getElementById(id);
 
   if(state.activeTab === "buyer"){
-    byId("inpCaseId")?.addEventListener("input", e => { state.caseId = e.target.value; });
+    byId("inpProjectTitle")?.addEventListener("input", e => { state.projectTitle = e.target.value; });
     byId("inpProvider")?.addEventListener("input", e => { state.providerAddress = e.target.value; });
     
-    // Bind requirement checkboxes
     document.querySelectorAll("input[data-req-id]").forEach(chk => {
       chk.addEventListener("change", e => {
         const reqId = e.target.getAttribute("data-req-id");
@@ -1651,7 +1639,6 @@ function bindTabEvents(){
       });
     });
 
-    // Add custom rule binding
     byId("btnAddCustomRule")?.addEventListener("click", () => {
       const val = byId("inpCustomRule")?.value.trim();
       if (val) {
@@ -1661,7 +1648,6 @@ function bindTabEvents(){
       }
     });
 
-    // Remove custom rule bindings
     document.querySelectorAll("button[data-del-custom]").forEach(btn => {
       btn.addEventListener("click", e => {
         const idx = Number(e.target.getAttribute("data-del-custom"));
@@ -1673,6 +1659,7 @@ function bindTabEvents(){
 
     byId("btnCreateAndFund")?.addEventListener("click", createAndFundCase);
     byId("btnConnectCase")?.addEventListener("click", connectToExistingCase);
+    byId("btnNewCase")?.addEventListener("click", resetCase);
   }
 
   if(state.activeTab === "provider"){
