@@ -232,7 +232,6 @@
     </span>
   </div>
 
-  <!-- Glass Dropdown Bar for Multi-Case Sync & Details -->
   <div id="dynamicCaseSelectorContainer"></div>
 
   <div class="glass rounded-2xl px-4 md:px-6 py-4 mb-6 overflow-x-auto">
@@ -382,10 +381,6 @@ function getClient() {
   });
 }
 
-// FIX: safe wei <-> GEN conversion helpers. Escrow amounts are BigInt with 18
-// decimals; converting straight to a JS Number (as the original code did) loses
-// precision once values exceed Number.MAX_SAFE_INTEGER. These keep everything in
-// BigInt / string form until final display.
 function weiToGenString(weiValue) {
   let wei;
   try { wei = BigInt(weiValue); } catch (e) { return "0"; }
@@ -471,12 +466,12 @@ function generateUniqueCaseId() {
 let state = {
   activeTab: "buyer",
   agreement: JSON.parse(JSON.stringify(DEFAULT_AGREEMENT)),
-  caseId: generateUniqueCaseId(), // Auto-generated unique case ID
-  projectTitle: "My Secure API Project", // Custom title / note field
+  caseId: generateUniqueCaseId(),
+  projectTitle: "My Secure API Project",
   buyerAddress: "",
   providerAddress: "",
   userCasesList: [],
-  caseDetailsCache: {}, // Stores title and state for each fetched case
+  caseDetailsCache: {},
   caseCreated: false,
   caseState: "DRAFT",
   escrowBalance: 0,
@@ -560,7 +555,6 @@ async function fetchUserCases(walletAddress) {
       const caseIds = casesStr.split(",").map(c => c.trim()).filter(Boolean);
       state.userCasesList = caseIds;
 
-      // Fetch details (title & state) for each case to display in dropdown
       for (const cid of caseIds) {
         try {
           const remoteState = await client.readContract({
@@ -604,9 +598,6 @@ async function fetchUserCases(walletAddress) {
   }
 }
 
-// ==========================================
-// FIXED & ISOLATED fetchOnChainHistory
-// ==========================================
 async function fetchOnChainHistory() {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return;
@@ -647,7 +638,6 @@ async function fetchOnChainHistory() {
         state.escrowBalance = weiToGenNumber(escrowVal);
       }
 
-      // Explicitly check for verdict/audit states and sync adjudication results & audit reports
       if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"].includes(formattedState)) {
         const verdictResult = await client.readContract({
           address: contractAddress,
@@ -870,7 +860,6 @@ if (typeof window.ethereum !== 'undefined') {
   window.ethereum.on('chainChanged', () => window.location.reload());
 }
 
-// Single-step Atomic Create and Fund Transaction with Custom Title
 async function createAndFundCase(){
   const contractAddress = await getContractAddress();
   if(!contractAddress){ showToast("Contract Address is missing", "error"); return; }
@@ -992,6 +981,9 @@ async function submitDelivery(){
   }
 }
 
+// ==========================================
+// DYNAMIC 10s POLLING ADJUDICATION FUNCTION
+// ==========================================
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
   if(!contractAddress || state.caseState !== "SUBMITTED" || state.isAdjudicating) return;
@@ -999,7 +991,7 @@ async function requestAdjudication(){
   state.caseState = "ADJUDICATING";
   state.isAdjudicating = true;
   renderAll();
-  showLoadingOverlay("Smart Code Auditor in Progress", "Evaluating code against selected requirements...");
+  showLoadingOverlay("Smart Code Auditor in Progress", "Transaction submitted. Waiting for validators consensus & AI adjudication...");
 
   try {
     const client = getClient();
@@ -1011,7 +1003,40 @@ async function requestAdjudication(){
       args: [state.caseId, targetUrl],
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    pushLog(`Adjudication transaction sent: ${txHash}`, "info");
+
+    let isFinalized = false;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 attempts * 10s = 5 minutes total polling time
+
+    while (!isFinalized && attempts < maxAttempts) {
+      attempts++;
+      await new Promise(r => setTimeout(r, 10000)); // 10 second delay between checks to protect RPC limits
+
+      try {
+        showLoadingOverlay("AI Consensus in Progress", `Validating code and collecting node votes (Attempt ${attempts}/${maxAttempts}, checking every 10s)...`);
+
+        const currentRemoteState = await client.readContract({
+          address: contractAddress,
+          functionName: "get_case_state",
+          args: [state.caseId],
+        });
+
+        if (currentRemoteState) {
+          const formatted = String(currentRemoteState).trim();
+          if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formatted)) {
+            isFinalized = true;
+            state.caseState = formatted;
+          }
+        }
+      } catch (pollErr) {
+        console.warn("Polling attempt warning (will retry in 10s):", pollErr);
+      }
+    }
+
+    if (!isFinalized) {
+      throw new Error("Adjudication consensus timed out on the frontend. Please click 'Sync Case' to check final results.");
+    }
 
     const verdictResult = await client.readContract({
       address: contractAddress,
@@ -1034,18 +1059,20 @@ async function requestAdjudication(){
       state.auditReport = null;
     }
 
-    const verdict = String(verdictResult || "ACCEPTED");
+    const verdict = String(verdictResult || "ACCEPTED").trim();
     state.caseState = verdict;
     state.isAdjudicating = false;
     state.consensus = { verdict, rate: 1.0 };
+    
     saveCaseToHistory();
     hideLoadingOverlay();
-    showToast(`Audit completed! Verdict: ${verdict}`);
+    showToast(`Audit completed successfully! Verdict: ${verdict}`);
     renderAll();
   } catch(err) {
     state.isAdjudicating = false;
     state.caseState = "SUBMITTED";
     hideLoadingOverlay();
+    console.error(err);
     showToast(`Adjudication failed: ${err.message}`, "error");
     renderAll();
   }
