@@ -409,6 +409,79 @@ function genAmountToWei(amountInput) {
   }
 }
 
+async function rpcCallWithRetry(fn, { retries = 4, baseDelay = 1500, label = "RPC call" } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      const transient = /fetch|network|timeout|ECONN|rate limit|unknown rpc/i.test(msg);
+      if (!transient || attempt === retries) throw err;
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.warn(`${label} failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms:`, msg);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+// Single source of truth for pulling case state + verdict + audit report off-chain.
+// Used by fetchOnChainHistory, requestAdjudication, and raiseAppeal so all three
+// paths behave identically instead of duplicating (and diverging on) this logic.
+async function syncVerdictData(caseId) {
+  const contractAddress = await getContractAddress();
+  if (!contractAddress) return false;
+  const client = getClient();
+
+  const remoteState = await rpcCallWithRetry(
+    () => client.readContract({ address: contractAddress, functionName: "get_case_state", args: [caseId] }),
+    { label: "get_case_state" }
+  ).catch(() => null);
+
+  if (remoteState === null || remoteState === undefined) return false;
+  const formattedState = String(remoteState).trim();
+  if (!formattedState) return false;
+
+  state.caseState = formattedState;
+  state.caseCreated = formattedState !== "DRAFT";
+
+  const escrowVal = await rpcCallWithRetry(
+    () => client.readContract({ address: contractAddress, functionName: "get_escrow_balance", args: [caseId] }),
+    { label: "get_escrow_balance" }
+  ).catch(() => null);
+  if (escrowVal !== null && escrowVal !== undefined) {
+    try { state.escrowBalance = weiToGenNumber(escrowVal); } catch (e) {}
+    if (Number(escrowVal) > 0) state.caseCreated = true;
+  }
+
+  const verdictStates = ["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"];
+  if (!verdictStates.includes(formattedState)) return true; // synced fine, no verdict yet
+
+  const [verdictResult, auditRes] = await Promise.all([
+    rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_adjudication_result", args: [caseId] }), { label: "get_adjudication_result" }).catch(() => ""),
+    rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_audit_report", args: [caseId] }), { label: "get_audit_report" }).catch(() => "{}"),
+  ]);
+
+  const actualVerdict = verdictResult && String(verdictResult).trim() ? String(verdictResult).trim() : formattedState;
+  state.caseState = actualVerdict;
+  state.consensus = { verdict: actualVerdict, rate: 1.0 };
+
+  try {
+    const parsedReport = JSON.parse(auditRes);
+    state.auditReport = parsedReport;
+    if (parsedReport && parsedReport.total_score !== undefined) {
+      state.overridePercent = Number(parsedReport.total_score);
+    }
+  } catch (e) {
+    console.warn("Failed to parse audit report JSON for case", caseId, e, auditRes);
+  }
+
+  saveCaseToHistory();
+  return true;
+}
+
 const STATE_FLOW = ["DRAFT","ACTIVE","SUBMITTED","ADJUDICATING","ACCEPTED_DISPUTED","APPEALED","FINALIZED","SETTLED"];
 const STATE_LABELS = {
   DRAFT:"Draft", ACTIVE:"Funded / Active", SUBMITTED:"Submitted", ADJUDICATING:"Adjudicating",
@@ -601,76 +674,25 @@ async function fetchUserCases(walletAddress) {
 async function fetchOnChainHistory() {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return;
+  const client = getClient();
+
   try {
-    const client = getClient();
-    const remoteState = await client.readContract({
-      address: contractAddress,
-      functionName: "get_case_state",
-      args: [state.caseId],
-    });
-    if (remoteState && typeof remoteState === 'string' && remoteState.trim() !== "") {
-      const formattedState = remoteState.trim();
-      const escrowVal = await client.readContract({
-        address: contractAddress,
-        functionName: "get_escrow_balance",
-        args: [state.caseId],
-      }).catch(() => 0n);
+    const caseJsonStr = await rpcCallWithRetry(
+      () => client.readContract({ address: contractAddress, functionName: "get_case", args: [state.caseId] }),
+      { label: "get_case" }
+    ).catch(() => "");
 
-      const caseJsonStr = await client.readContract({
-        address: contractAddress,
-        functionName: "get_case",
-        args: [state.caseId],
-      }).catch(() => "");
-
-      if (caseJsonStr) {
-        try {
-          const parsed = JSON.parse(caseJsonStr);
-          if (parsed.project_title) state.projectTitle = parsed.project_title;
-          if (Array.isArray(parsed.requirements) && parsed.requirements.length > 0) {
-            state.agreement = parsed;
-          }
-        } catch(e){}
-      }
-
-      state.caseState = formattedState;
-      state.caseCreated = formattedState !== "DRAFT" || Number(escrowVal) > 0;
-      if (escrowVal && BigInt(escrowVal) > 0n) {
-        state.escrowBalance = weiToGenNumber(escrowVal);
-      }
-
-      if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"].includes(formattedState)) {
-        const verdictResult = await client.readContract({
-          address: contractAddress,
-          functionName: "get_adjudication_result",
-          args: [state.caseId],
-        }).catch(() => "");
-
-        if (verdictResult && typeof verdictResult === 'string' && verdictResult.trim() !== "") {
-          const actualVerdict = verdictResult.trim();
-          state.caseState = actualVerdict;
-          state.consensus = { verdict: actualVerdict, rate: 1.0 };
-        } else {
-          state.consensus = { verdict: formattedState, rate: 1.0 };
+    if (caseJsonStr) {
+      try {
+        const parsed = JSON.parse(caseJsonStr);
+        if (parsed.project_title) state.projectTitle = parsed.project_title;
+        if (Array.isArray(parsed.requirements) && parsed.requirements.length > 0) {
+          state.agreement = parsed;
         }
-
-        const auditRes = await client.readContract({
-          address: contractAddress,
-          functionName: "get_audit_report",
-          args: [state.caseId],
-        }).catch(() => "{}");
-
-        try {
-          state.auditReport = JSON.parse(auditRes);
-          if (state.auditReport && state.auditReport.total_score !== undefined) {
-            state.overridePercent = Number(state.auditReport.total_score);
-          }
-        } catch(e) {
-          state.auditReport = null;
-        }
-      }
-
-      saveCaseToHistory();
+      } catch(e){}
     }
+
+    await syncVerdictData(state.caseId);
   } catch (err) {
     console.warn("Failed to fetch on-chain history:", err);
   }
@@ -982,7 +1004,7 @@ async function submitDelivery(){
 }
 
 // ==========================================
-// DYNAMIC 10s POLLING ADJUDICATION FUNCTION
+// DYNAMIC ADJUDICATION FUNCTION (retry-safe + shared verdict sync)
 // ==========================================
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
@@ -997,37 +1019,44 @@ async function requestAdjudication(){
     const client = getClient();
     const targetUrl = state.evidence.githubUrl || "https://github.com";
 
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "request_adjudication",
-      args: [state.caseId, targetUrl],
-    });
+    const txHash = await rpcCallWithRetry(
+      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, targetUrl] }),
+      { label: "request_adjudication tx" }
+    );
 
     pushLog(`Adjudication transaction sent: ${txHash}`, "info");
+
+    let receiptOk = false;
+    try {
+      await rpcCallWithRetry(
+        () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 180000 }),
+        { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(request_adjudication)" }
+      );
+      receiptOk = true;
+    } catch (receiptErr) {
+      console.warn("waitForTransactionReceipt failed, falling back to state polling:", receiptErr);
+    }
 
     let isFinalized = false;
     let attempts = 0;
     const maxAttempts = 30; // 30 attempts * 10s = 5 minutes total polling time
 
+    if (receiptOk) {
+      isFinalized = await syncVerdictData(state.caseId)
+        .then(() => ["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(state.caseState))
+        .catch(() => false);
+    }
+
     while (!isFinalized && attempts < maxAttempts) {
       attempts++;
       await new Promise(r => setTimeout(r, 10000)); // 10 second delay between checks to protect RPC limits
 
+      showLoadingOverlay("AI Consensus in Progress", `Validating code and collecting node votes (Attempt ${attempts}/${maxAttempts}, checking every 10s)...`);
+
       try {
-        showLoadingOverlay("AI Consensus in Progress", `Validating code and collecting node votes (Attempt ${attempts}/${maxAttempts}, checking every 10s)...`);
-
-        const currentRemoteState = await client.readContract({
-          address: contractAddress,
-          functionName: "get_case_state",
-          args: [state.caseId],
-        });
-
-        if (currentRemoteState) {
-          const formatted = String(currentRemoteState).trim();
-          if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formatted)) {
-            isFinalized = true;
-            state.caseState = formatted;
-          }
+        const synced = await syncVerdictData(state.caseId);
+        if (synced && ["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(state.caseState)) {
+          isFinalized = true;
         }
       } catch (pollErr) {
         console.warn("Polling attempt warning (will retry in 10s):", pollErr);
@@ -1035,45 +1064,24 @@ async function requestAdjudication(){
     }
 
     if (!isFinalized) {
-      throw new Error("Adjudication consensus timed out on the frontend. Please click 'Sync Case' to check final results.");
+      throw new Error("Adjudication consensus timed out on the frontend. Click 'Sync Case' — the transaction may still finalize on-chain.");
     }
 
-    const verdictResult = await client.readContract({
-      address: contractAddress,
-      functionName: "get_adjudication_result",
-      args: [state.caseId],
-    });
-
-    const auditRes = await client.readContract({
-      address: contractAddress,
-      functionName: "get_audit_report",
-      args: [state.caseId],
-    }).catch(() => "{}");
-
-    try {
-      state.auditReport = JSON.parse(auditRes);
-      if (state.auditReport && state.auditReport.total_score !== undefined) {
-        state.overridePercent = Number(state.auditReport.total_score);
-      }
-    } catch(e) {
-      state.auditReport = null;
-    }
-
-    const verdict = String(verdictResult || "ACCEPTED").trim();
-    state.caseState = verdict;
     state.isAdjudicating = false;
-    state.consensus = { verdict, rate: 1.0 };
-    
-    saveCaseToHistory();
     hideLoadingOverlay();
-    showToast(`Audit completed successfully! Verdict: ${verdict}`);
+    showToast(`Audit completed successfully! Verdict: ${state.consensus ? state.consensus.verdict : state.caseState}`);
     renderAll();
   } catch(err) {
     state.isAdjudicating = false;
-    state.caseState = "SUBMITTED";
+    // A "Failed to fetch" here does not necessarily mean the transaction failed —
+    // re-check on-chain truth before reverting the UI back to SUBMITTED.
+    try { await syncVerdictData(state.caseId); } catch(e) {}
+    if (!["ACCEPTED","DISPUTED","FINALIZED","SETTLED"].includes(state.caseState)) {
+      state.caseState = "SUBMITTED";
+    }
     hideLoadingOverlay();
     console.error(err);
-    showToast(`Adjudication failed: ${err.message}`, "error");
+    showToast(`Adjudication issue: ${err.message}. Click 'Sync Case' to re-check on-chain status.`, "error");
     renderAll();
   }
 }
@@ -1089,55 +1097,37 @@ async function raiseAppeal() {
     showLoadingOverlay("Recording Appeal", "Submitting appeal justification on-chain...");
     const client = getClient();
 
-    const appealTxHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "raise_appeal",
-      args: [state.caseId, state.appealJustification],
-    });
-    await client.waitForTransactionReceipt({ hash: appealTxHash, waitUntil: "finalized", timeout: 120000 });
+    const appealTxHash = await rpcCallWithRetry(
+      () => client.writeContract({ address: contractAddress, functionName: "raise_appeal", args: [state.caseId, state.appealJustification] }),
+      { label: "raise_appeal tx" }
+    );
+    await rpcCallWithRetry(
+      () => client.waitForTransactionReceipt({ hash: appealTxHash, waitUntil: "finalized", timeout: 120000 }),
+      { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(raise_appeal)" }
+    );
 
     state.caseState = "APPEALED";
     renderAll();
     showLoadingOverlay("Running Re-Audit", "Submitting decentralized re-adjudication...");
 
-    const txHash = await client.writeContract({
-      address: contractAddress,
-      functionName: "request_adjudication",
-      args: [state.caseId, state.evidence.githubUrl || "https://github.com"],
-    });
+    const txHash = await rpcCallWithRetry(
+      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, state.evidence.githubUrl || "https://github.com"] }),
+      { label: "request_adjudication (appeal) tx" }
+    );
+    await rpcCallWithRetry(
+      () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 180000 }),
+      { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(re-adjudication)" }
+    );
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
-
-    const verdictResult = await client.readContract({
-      address: contractAddress,
-      functionName: "get_adjudication_result",
-      args: [state.caseId],
-    });
-
-    const auditRes = await client.readContract({
-      address: contractAddress,
-      functionName: "get_audit_report",
-      args: [state.caseId],
-    }).catch(() => "{}");
-
-    try {
-      state.auditReport = JSON.parse(auditRes);
-      if (state.auditReport && state.auditReport.total_score !== undefined) {
-        state.overridePercent = Number(state.auditReport.total_score);
-      }
-    } catch(e){}
-
-    const verdict = String(verdictResult || "DISPUTED");
-    state.caseState = verdict;
-    state.consensus = { verdict, rate: 1.0 };
+    await syncVerdictData(state.caseId);
     state.appealJustification = "";
-    saveCaseToHistory();
     hideLoadingOverlay();
-    showToast(`Appeal processed! New verdict: ${verdict}`);
+    showToast(`Appeal processed! New verdict: ${state.consensus ? state.consensus.verdict : state.caseState}`);
     renderAll();
   } catch(err) {
     hideLoadingOverlay();
-    showToast(`Appeal failed: ${err.message}`, "error");
+    try { await syncVerdictData(state.caseId); } catch(e) {}
+    showToast(`Appeal step failed: ${err.message}. Click 'Sync Case' to verify on-chain status.`, "error");
     renderAll();
   }
 }
@@ -1564,9 +1554,11 @@ function renderProviderTab(){
 
 function renderCourtTab(){
   const canAdjudicate = state.caseState === "SUBMITTED";
+  const verdictStates = ["ACCEPTED","DISPUTED","FINALIZED","SETTLED","APPEALED"];
+  const hasVerdictData = !!state.consensus || verdictStates.includes(state.caseState);
   const inConsensus = ["ACCEPTED","DISPUTED"].includes(state.caseState);
-  const isDisputed = state.caseState === "DISPUTED";
-  const isAccepted = state.caseState === "ACCEPTED";
+  const isDisputed = state.caseState === "DISPUTED" || (state.consensus && state.consensus.verdict === "DISPUTED");
+  const isAccepted = state.caseState === "ACCEPTED" || (state.consensus && state.consensus.verdict === "ACCEPTED");
   const canFinalize = inConsensus || state.caseState === "APPEALED";
   const canSettle = state.caseState === "FINALIZED";
 
@@ -1592,11 +1584,11 @@ function renderCourtTab(){
         </button>
       </div>
 
-      ${state.consensus ? `
+      ${hasVerdictData ? `
         <div class="rounded-xl border ${isAccepted?'border-emerald-500/40 bg-emerald-500/10':'border-red-500/40 bg-red-500/10'} p-4 flex items-center justify-between flex-wrap gap-3 shadow-lg">
           <div>
             <div class="font-mono text-xs text-slate-400 mb-1">Audit Verdict Result</div>
-            <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${escapeHtml(state.consensus.verdict)}</div>
+            <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${escapeHtml(state.consensus ? state.consensus.verdict : state.caseState)}</div>
           </div>
           <div class="text-right font-mono text-xs text-slate-300">
             Earned Code Quality Score: <span class="${isAccepted?'text-emerald-400':'text-red-400'} font-bold text-base">${auditScore}%</span>
