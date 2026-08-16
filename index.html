@@ -604,6 +604,9 @@ async function fetchUserCases(walletAddress) {
   }
 }
 
+// ==========================================
+// FIXED & ISOLATED fetchOnChainHistory
+// ==========================================
 async function fetchOnChainHistory() {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return;
@@ -628,11 +631,6 @@ async function fetchOnChainHistory() {
         args: [state.caseId],
       }).catch(() => "");
 
-      // FIX: fully restore the agreement (requirements included) from on-chain JSON
-      // instead of always falling back to DEFAULT_AGREEMENT. Previously, a case
-      // created with a custom subset of requirements would display the wrong
-      // requirement list ("Passed/Failed Standards") once reloaded or synced from
-      // another session.
       if (caseJsonStr) {
         try {
           const parsed = JSON.parse(caseJsonStr);
@@ -649,7 +647,22 @@ async function fetchOnChainHistory() {
         state.escrowBalance = weiToGenNumber(escrowVal);
       }
 
-      if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED"].includes(formattedState)) {
+      // Explicitly check for verdict/audit states and sync adjudication results & audit reports
+      if (["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"].includes(formattedState)) {
+        const verdictResult = await client.readContract({
+          address: contractAddress,
+          functionName: "get_adjudication_result",
+          args: [state.caseId],
+        }).catch(() => "");
+
+        if (verdictResult && typeof verdictResult === 'string' && verdictResult.trim() !== "") {
+          const actualVerdict = verdictResult.trim();
+          state.caseState = actualVerdict;
+          state.consensus = { verdict: actualVerdict, rate: 1.0 };
+        } else {
+          state.consensus = { verdict: formattedState, rate: 1.0 };
+        }
+
         const auditRes = await client.readContract({
           address: contractAddress,
           functionName: "get_audit_report",
@@ -661,7 +674,6 @@ async function fetchOnChainHistory() {
           if (state.auditReport && state.auditReport.total_score !== undefined) {
             state.overridePercent = Number(state.auditReport.total_score);
           }
-          state.consensus = { verdict: formattedState, rate: 1.0 };
         } catch(e) {
           state.auditReport = null;
         }
@@ -680,17 +692,6 @@ async function autoSyncOnWalletConnect(walletAddress) {
   await fetchUserCases(walletAddress);
   renderAll();
 }
-
-// REMOVED: startRealtimePollingLoop() background setInterval polling was firing an
-// RPC call every 10s regardless of user activity, which is what triggered the
-// 429 (Too Many Requests) responses and related CORS failures under load. Sync
-// now happens only in two places, both user/action-triggered:
-//   1. autoSyncOnWalletConnect() — runs once automatically right after the wallet
-//      connects (see connectWallet() and the 'accountsChanged' listener below).
-//   2. Manually — via the "Sync Case" button (connectToExistingCase) or by
-//      switching a case in the case dropdown (renderCaseSelectorBar's change
-//      handler), both of which call fetchOnChainHistory()/fetchUserCases() once.
-// There is no longer any timer-based background refresh.
 
 function toggleTheme() {
   const body = document.body;
@@ -853,11 +854,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // FIX: no automatic fetchOnChainHistory()/polling on page load anymore either —
-  // per the requested behavior, on-chain sync only happens (1) right after wallet
-  // connect via autoSyncOnWalletConnect(), or (2) on a manual "Sync Case" click /
-  // case-dropdown switch. getContractAddress() just resolves the registry address,
-  // it does not touch case data.
   await getContractAddress();
   renderAll();
 });
@@ -881,14 +877,12 @@ async function createAndFundCase(){
   if(!state.caseId.trim()){ showToast("Case ID is required", "error"); return; }
   if(!state.providerAddress.trim()){ showToast("Provider address is required", "error"); return; }
   if(!state.buyerAddress){ showToast("Please connect your Web3 wallet first!", "error"); return; }
-  // FIX: guard against creating a case against yourself, matching the new contract assertion.
   if(state.providerAddress.trim().toLowerCase() === state.buyerAddress.trim().toLowerCase()){
     showToast("Provider address must be different from your connected wallet", "error");
     return;
   }
 
   const fundAmountRaw = document.getElementById("inpFundAmount")?.value || "500";
-  // FIX: support decimal GEN amounts safely and avoid BigInt() throwing on non-integer strings.
   const amountWei = genAmountToWei(fundAmountRaw);
   if(amountWei === null || amountWei <= 0n){ showToast("Valid escrow amount required", "error"); return; }
 
@@ -923,8 +917,6 @@ async function createAndFundCase(){
       value: amountWei,
     });
 
-    // FIX: added an explicit timeout so this call can't hang forever (matches the
-    // other write calls elsewhere in the app).
     await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseCreated = true;
@@ -986,7 +978,6 @@ async function submitDelivery(){
       args: [state.caseId, evidencePackage],
     });
 
-    // FIX: added an explicit timeout (previously missing, unlike the other write calls).
     await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
 
     state.caseState = "SUBMITTED";
@@ -1071,11 +1062,6 @@ async function raiseAppeal() {
     showLoadingOverlay("Recording Appeal", "Submitting appeal justification on-chain...");
     const client = getClient();
 
-    // FIX: previously this skipped straight to request_adjudication, which the old
-    // contract always rejected from a post-verdict state ("Case must be submitted
-    // for adjudication"). Now raise_appeal() is called first (moves state to
-    // APPEALED and records the justification), and the fixed contract accepts
-    // APPEALED as a valid starting state for request_adjudication.
     const appealTxHash = await client.writeContract({
       address: contractAddress,
       functionName: "raise_appeal",
@@ -1133,9 +1119,6 @@ async function finalizeSettlement(percent){
   const contractAddress = await getContractAddress();
   if(!contractAddress) return;
 
-  // FIX: only the buyer may finalize the settlement (matches the new contract
-  // access control) — fail fast in the UI with a clear message instead of
-  // sending a transaction guaranteed to revert.
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim() : "";
   if(!connectedWallet){ showToast("Please connect your Web3 wallet first!", "error"); return; }
 
@@ -1193,9 +1176,6 @@ async function settleCase(){
   }
 }
 
-// FIX (new): lets the buyer reclaim escrow if the provider never delivers past
-// the agreement's deadline. Calls the new claim_refund_after_deadline contract
-// function.
 async function claimRefund(){
   const contractAddress = await getContractAddress();
   if(!contractAddress) return;
@@ -1227,7 +1207,7 @@ async function claimRefund(){
 function resetCase(){
   state = {
     ...state,
-    caseId: generateUniqueCaseId(), // Generate fresh unique ID for new case
+    caseId: generateUniqueCaseId(),
     projectTitle: "New Project",
     caseCreated: false,
     caseState: "DRAFT",
@@ -1247,7 +1227,6 @@ function resetCase(){
 
 function setTab(t){ state.activeTab = t; renderAll(); }
 
-// Render Glass Dropdown Bar showing All Cases with Custom Title, ID, and State
 function renderCaseSelectorBar() {
   const container = document.getElementById("dynamicCaseSelectorContainer");
   if (!container) return;
@@ -1370,9 +1349,6 @@ function renderLog(){
 function currentDisplayScore(){
   if(state.auditReport && state.auditReport.total_score !== undefined) return Number(state.auditReport.total_score);
   if(state.overridePercent !== null && state.overridePercent !== undefined) return state.overridePercent;
-  // FIX: previously defaulted to 100 before any verdict existed, which visually
-  // tipped the scale toward "Accepted" for a case that hasn't been judged yet.
-  // A neutral midpoint is a more honest default when there's no consensus.
   return 50;
 }
 
@@ -1414,8 +1390,6 @@ function renderScale(){
 
 function renderBuyerTab(){
   const disabledCreate = state.caseCreated;
-  // FIX: only the buyer can claim a post-deadline refund, and only while the
-  // case is funded but stuck in ACTIVE (provider never submitted delivery).
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
   const isBuyerOfCase = !connectedWallet || connectedWallet === (state.buyerAddress || "").trim().toLowerCase();
   const showRefundClaim = disabledCreate && state.caseState === "ACTIVE" && isBuyerOfCase;
@@ -1445,7 +1419,6 @@ function renderBuyerTab(){
         </div>
       </div>
 
-      <!-- Requirements Selector with Checkboxes & Custom Rule Addition -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-xs text-cyan-300 font-mono uppercase tracking-wider block">Select Standards &amp; Custom Rules to Enforce</label>
@@ -1467,7 +1440,6 @@ function renderBuyerTab(){
           }).join("")}
         </div>
 
-        <!-- Add Custom Rule Section -->
         ${!disabledCreate ? `
           <div class="flex gap-2">
             <input id="inpCustomRule" placeholder="Add custom rule description (e.g., Must include Dockerfile)..." class="w-full rounded-lg px-3 py-2 text-xs" />
@@ -1571,9 +1543,6 @@ function renderCourtTab(){
   const canFinalize = inConsensus || state.caseState === "APPEALED";
   const canSettle = state.caseState === "FINALIZED";
 
-  // FIX: only the connected buyer may finalize the settlement — mirrors the new
-  // contract-level access control so the UI doesn't offer a button that will
-  // just revert for anyone else.
   const connectedWallet = state.buyerAddress ? state.buyerAddress.trim().toLowerCase() : "";
   const isBuyerConnected = !!connectedWallet;
 
