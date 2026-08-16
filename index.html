@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AgentCourt Protocol — Dispute Resolution & Settlement</title>
+<title>AgentCourt Protocol V2 — Dispute Resolution & Settlement</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><circle cx='24' cy='24' r='22' fill='%2322d3ee' opacity='0.2'/><path d='M24 6 L24 42 M12 14 L36 14 M8 20 L16 20 M32 20 L40 20' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -173,7 +173,7 @@
       </div>
       <div>
         <h1 class="font-display text-2xl md:text-[28px] font-700 leading-none">
-          <span class="text-gradient">AgentCourt</span> <span class="text-slate-100">Protocol</span>
+          <span class="text-gradient">AgentCourt</span> <span class="text-slate-100">Protocol V2</span>
         </h1>
         <p class="text-[13px] text-slate-400 mt-1">Trustless dispute resolution &amp; settlement for autonomous agents — running on GenLayer network</p>
       </div>
@@ -339,7 +339,7 @@
       </div>
     </div>
     <div class="text-center text-[11px] text-slate-600 pt-4 border-t border-slate-900">
-      AgentCourt Protocol — Real GenLayer Intelligent Contract Integration. All rights reserved.
+      AgentCourt Protocol V2 — Real GenLayer Intelligent Contract Integration. All rights reserved.
     </div>
   </footer>
 </div>
@@ -350,6 +350,7 @@ import { studionet } from "genlayer-js/chains";
 
 const FIXED_REGISTRY_ADDRESS = "0x42Cf94434cBb800654cf9D4eb1048B48acfA0Ff8";
 let cachedCourtAddress = "";
+const CACHE_PREFIX = "agentcourt_v2_";
 
 async function getContractAddress() {
   if (cachedCourtAddress) return cachedCourtAddress;
@@ -427,11 +428,42 @@ async function rpcCallWithRetry(fn, { retries = 4, baseDelay = 1500, label = "RP
   throw lastErr;
 }
 
-// Single source of truth for pulling case state + verdict + audit report off-chain with object-safe requirements normalization.
+// Single source of truth for pulling case state + verdict + audit report off-chain with V2 CACHE.
 async function syncVerdictData(caseId) {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return false;
   const client = getClient();
+
+  // V2 Fix: Reset consensus logic before reading to prevent UI ghosting
+  state.consensus = null;
+  state.auditReport = null;
+  state.auditScoreOnChain = 0;
+
+  // V2 Caching Logic: Fetch metadata first (lightweight RPC)
+  const metaStr = await rpcCallWithRetry(
+    () => client.readContract({ address: contractAddress, functionName: "get_case_meta", args: [caseId] }),
+    { label: "get_case_meta" }
+  ).catch(() => "{}");
+  
+  let meta = {};
+  try { meta = JSON.parse(metaStr); } catch(e){}
+
+  const cacheKey = CACHE_PREFIX + caseId;
+  const cachedStr = localStorage.getItem(cacheKey);
+  let localCache = null;
+  if(cachedStr) { try { localCache = JSON.parse(cachedStr); } catch(e){} }
+
+  // Compare updated_at. If unchanged, skip heavy RPC calls
+  if(localCache && meta.updated_at && localCache.updated_at === meta.updated_at) {
+    state.caseState = localCache.caseState;
+    state.caseCreated = localCache.caseCreated;
+    state.escrowBalance = localCache.escrowBalance;
+    state.consensus = localCache.consensus;
+    state.auditReport = localCache.auditReport;
+    state.auditScoreOnChain = localCache.auditScoreOnChain;
+    state.projectTitle = localCache.projectTitle;
+    return true;
+  }
 
   const remoteState = await rpcCallWithRetry(
     () => client.readContract({ address: contractAddress, functionName: "get_case_state", args: [caseId] }),
@@ -455,16 +487,27 @@ async function syncVerdictData(caseId) {
   }
 
   const verdictStates = ["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"];
-  if (!verdictStates.includes(formattedState)) return true;
+  if (!verdictStates.includes(formattedState)) {
+    // Cache active state
+    localStorage.setItem(cacheKey, JSON.stringify({
+      updated_at: meta.updated_at, caseState: state.caseState, caseCreated: state.caseCreated,
+      escrowBalance: state.escrowBalance, projectTitle: state.projectTitle
+    }));
+    saveCaseToHistory();
+    return true;
+  }
 
-  const [verdictResult, auditRes] = await Promise.all([
+  // V2 Fix: Fetch get_audit_score alongside get_audit_report
+  const [verdictResult, auditRes, scoreRes] = await Promise.all([
     rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_adjudication_result", args: [caseId] }), { label: "get_adjudication_result" }).catch(() => ""),
     rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_audit_report", args: [caseId] }), { label: "get_audit_report" }).catch(() => "{}"),
+    rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_audit_score", args: [caseId] }), { label: "get_audit_score" }).catch(() => 0)
   ]);
 
   const actualVerdict = verdictResult && String(verdictResult).trim() ? String(verdictResult).trim() : formattedState;
   state.caseState = actualVerdict;
   state.consensus = { verdict: actualVerdict, rate: 1.0 };
+  state.auditScoreOnChain = Number(scoreRes);
 
   try {
     const parsedReport = JSON.parse(auditRes);
@@ -487,6 +530,13 @@ async function syncVerdictData(caseId) {
     console.warn("Failed to parse audit report JSON for case", caseId, e, auditRes);
   }
 
+  // Update Cache
+  localStorage.setItem(cacheKey, JSON.stringify({
+    updated_at: meta.updated_at, caseState: state.caseState, caseCreated: state.caseCreated,
+    escrowBalance: state.escrowBalance, consensus: state.consensus, auditReport: state.auditReport,
+    auditScoreOnChain: state.auditScoreOnChain, projectTitle: state.projectTitle
+  }));
+
   saveCaseToHistory();
   return true;
 }
@@ -503,12 +553,7 @@ const DEFAULT_AGREEMENT = {
   payment: "500 GEN",
   deadline: 1788000000,
   project_scope: "Code and Documentation Verification Challenge",
-  expected_claims: [
-    "OAuth2 Authentication must be mandatory for all API routes",
-    "Rate Limiting must be implemented to protect against DoS attacks",
-    "AES-256 Encryption must be applied to all sensitive stored data",
-    "Input Sanitization must fully protect against SQL Injection"
-  ],
+  expected_claims: [],
   requirements: [
     { id: "R1", description: "Invariant Testing ensuring core contract rules and escrow balances are never violated", weight: 6 },
     { id: "R2", description: "Reentrancy Guard implemented for all token withdrawals and transfers", weight: 6 },
@@ -558,16 +603,19 @@ let state = {
   caseState: "DRAFT",
   escrowBalance: 0,
   evidence: { githubUrl:"", apiUrl:"", notes:"" },
+  appealTarget: "",
+  appealUrl: "",
+  appealJustification: "",
   sanitizeHits: [],
   isAdjudicating: false,
   validators: [],
   consensus: null,
   auditReport: null,
+  auditScoreOnChain: 0,
   requirementResults: [],
   computedScore: null,
   overridePercent: null,
   settlementAmount: null,
-  appealJustification: "",
   appealed: false,
   caseHistory: [],
   log: [],
@@ -913,6 +961,9 @@ async function createAndFundCase(){
 
   if(activeReqs.length === 0){ showToast("Select at least one requirement or add a custom rule", "error"); return; }
 
+  // V2 Fix: Dynamic Expected Claims Generation
+  const dynamicClaims = activeReqs.map(r => r.description);
+
   const totalWeight = activeReqs.reduce((sum, r) => sum + r.weight, 0);
   if (totalWeight > 0) {
     activeReqs.forEach(r => r.weight = Math.round((r.weight / totalWeight) * 100));
@@ -922,6 +973,7 @@ async function createAndFundCase(){
     ...DEFAULT_AGREEMENT,
     case_id: state.caseId,
     project_title: state.projectTitle || "Untitled Project",
+    expected_claims: dynamicClaims, // Replaces fixed claims
     requirements: activeReqs
   };
   state.agreement = finalAgreement;
@@ -983,13 +1035,12 @@ async function submitDelivery(){
   }
 
   const evidencePackage = JSON.stringify({
-    githubUrl: state.evidence.githubUrl,
-    apiUrl: state.evidence.apiUrl,
+    url: state.evidence.githubUrl || state.evidence.apiUrl,
     notes: state.evidence.notes
   });
 
   try {
-    showLoadingOverlay("Submitting Delivery", "Storing delivery evidence package on-chain...");
+    showLoadingOverlay("Submitting Delivery", "Generating Evidence Snapshot & Storing on-chain...");
     const client = getClient();
 
     const txHash = await client.writeContract({
@@ -1003,7 +1054,7 @@ async function submitDelivery(){
     state.caseState = "SUBMITTED";
     saveCaseToHistory();
     hideLoadingOverlay();
-    showToast("Delivery evidence submitted on-chain!");
+    showToast("Delivery evidence snapshot submitted on-chain!");
     renderAll();
   } catch(err) {
     console.error(err);
@@ -1013,7 +1064,7 @@ async function submitDelivery(){
 }
 
 // ==========================================
-// DYNAMIC ADJUDICATION FUNCTION (retry-safe + 10s polling + object-safe requirements)
+// DYNAMIC ADJUDICATION FUNCTION (V2 Secure Flow)
 // ==========================================
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
@@ -1026,10 +1077,10 @@ async function requestAdjudication(){
 
   try {
     const client = getClient();
-    const targetUrl = state.evidence.githubUrl || "https://github.com";
-
+    
+    // V2 Fix: `web_url` argument completely removed. Contract pulls recorded evidence securely.
     const txHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, targetUrl] }),
+      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId] }),
       { label: "request_adjudication tx" }
     );
 
@@ -1100,12 +1151,19 @@ async function raiseAppeal() {
     return;
   }
 
+  // V2 Structured Appeal
+  const structuredAppeal = JSON.stringify({
+    reason: state.appealJustification,
+    target: state.appealTarget,
+    new_url: state.appealUrl
+  });
+
   try {
-    showLoadingOverlay("Recording Appeal", "Submitting appeal justification on-chain...");
+    showLoadingOverlay("Recording Appeal", "Submitting structured appeal justification on-chain...");
     const client = getClient();
 
     const appealTxHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "raise_appeal", args: [state.caseId, state.appealJustification] }),
+      () => client.writeContract({ address: contractAddress, functionName: "raise_appeal", args: [state.caseId, structuredAppeal] }),
       { label: "raise_appeal tx" }
     );
     await rpcCallWithRetry(
@@ -1117,8 +1175,9 @@ async function raiseAppeal() {
     renderAll();
     showLoadingOverlay("Running Re-Audit", "Submitting decentralized re-adjudication...");
 
+    // V2 Fix: request_adjudication takes only case_id
     const txHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId, state.evidence.githubUrl || "https://github.com"] }),
+      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId] }),
       { label: "request_adjudication (appeal) tx" }
     );
     await rpcCallWithRetry(
@@ -1128,6 +1187,8 @@ async function raiseAppeal() {
 
     await syncVerdictData(state.caseId);
     state.appealJustification = "";
+    state.appealTarget = "";
+    state.appealUrl = "";
     hideLoadingOverlay();
     showToast(`Appeal processed! New verdict: ${state.consensus ? state.consensus.verdict : state.caseState}`);
     renderAll();
@@ -1170,6 +1231,35 @@ async function finalizeSettlement(percent){
   } catch(err) {
     hideLoadingOverlay();
     showToast(`Finalization failed: ${err.message}`, "error");
+  }
+}
+
+// V2 Feature: Force Finalize
+async function forceFinalize() {
+  const contractAddress = await getContractAddress();
+  if(!contractAddress) return;
+
+  try {
+    showLoadingOverlay("Force Finalizing", "Resolving abandoned case based on grace period...");
+    const client = getClient();
+
+    const txHash = await rpcCallWithRetry(
+      () => client.writeContract({ address: contractAddress, functionName: "force_finalize", args: [state.caseId] }),
+      { label: "force_finalize tx" }
+    );
+
+    await rpcCallWithRetry(
+      () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 }),
+      { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(force_finalize)" }
+    );
+
+    await syncVerdictData(state.caseId);
+    hideLoadingOverlay();
+    showToast("Case force finalized successfully.");
+    renderAll();
+  } catch(err) {
+    hideLoadingOverlay();
+    showToast(`Force finalize failed: ${err.message}`, "error");
   }
 }
 
@@ -1239,8 +1329,11 @@ function resetCase(){
     evidence: {githubUrl:"", apiUrl:"", notes:""},
     auditReport: null,
     consensus: null,
+    auditScoreOnChain: 0,
     settlementAmount: null,
     appealJustification: "",
+    appealTarget: "",
+    appealUrl: "",
     selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id),
     customReqs: []
   };
@@ -1371,6 +1464,7 @@ function renderLog(){
 }
 
 function currentDisplayScore(){
+  if(state.auditScoreOnChain !== undefined && state.auditScoreOnChain > 0) return state.auditScoreOnChain;
   if(state.auditReport && state.auditReport.total_score !== undefined) return Number(state.auditReport.total_score);
   if(state.overridePercent !== null && state.overridePercent !== undefined) return state.overridePercent;
   return 50;
@@ -1573,7 +1667,9 @@ function renderCourtTab(){
   const isBuyerConnected = !!connectedWallet;
 
   const totalEscrow = Number(state.escrowBalance) || 500;
-  const auditScore = state.auditReport && state.auditReport.total_score !== undefined ? Number(state.auditReport.total_score) : (isAccepted ? 100 : (isDisputed ? 0 : 100));
+  
+  // V2 Fix: Use actual on-chain score for limits, fallback to UI calculation if un-synced
+  const auditScore = state.auditScoreOnChain || (isAccepted ? 100 : 0);
   const defaultProviderPercent = isDisputed ? 0 : auditScore;
 
   const passedReqs = state.auditReport && state.auditReport.passed_requirements ? state.auditReport.passed_requirements : [];
@@ -1598,7 +1694,7 @@ function renderCourtTab(){
             <div class="font-display text-2xl font-700 ${isAccepted?'text-emerald-300':'text-red-300'}">${escapeHtml(state.consensus ? state.consensus.verdict : state.caseState)}</div>
           </div>
           <div class="text-right font-mono text-xs text-slate-300">
-            Earned Code Quality Score: <span class="${isAccepted?'text-emerald-400':'text-red-400'} font-bold text-base">${auditScore}%</span>
+            Enforced Code Quality Score: <span class="${isAccepted?'text-emerald-400':'text-red-400'} font-bold text-base">${auditScore}%</span>
           </div>
         </div>
 
@@ -1646,9 +1742,13 @@ function renderCourtTab(){
 
       ${isDisputed ? `
         <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
-          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Audit Disputed — Request Re-evaluation</h3>
-          <p class="text-xs text-slate-300">The code auditor identified gaps. Address the reasons above in your repository, then submit appeal justification for re-auditing.</p>
-          <textarea id="inpAppealJustification" rows="3" placeholder="Provide justification or repository fix references..." class="w-full rounded-lg px-3 py-2">${escapeHtml(state.appealJustification || '')}</textarea>
+          <h3 class="font-display text-sm font-600 text-amber-200">⚖️ Audit Disputed — Structured Appeal</h3>
+          <p class="text-xs text-slate-300">The code auditor identified gaps. Submit a structured appeal pointing to a specific requirement and providing new evidence (max 1 appeal per party).</p>
+          <div class="grid md:grid-cols-2 gap-3 mb-2">
+              <input id="inpAppealTarget" value="${escapeHtml(state.appealTarget)}" placeholder="Target Requirement (e.g. R6)" class="w-full rounded-lg px-3 py-2 text-xs" />
+              <input id="inpAppealUrl" value="${escapeHtml(state.appealUrl)}" placeholder="New Evidence URL (Optional)" class="w-full rounded-lg px-3 py-2 text-xs" />
+          </div>
+          <textarea id="inpAppealJustification" rows="3" placeholder="Provide appeal justification..." class="w-full rounded-lg px-3 py-2">${escapeHtml(state.appealJustification || '')}</textarea>
           <button id="btnAppeal" class="btn glow-amber px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-100 text-xs">
             Submit Appeal &amp; Re-run Code Audit
           </button>
@@ -1687,9 +1787,15 @@ function renderCourtTab(){
                 <input id="inpPercent" type="number" min="0" max="${isAccepted ? auditScore : 0}" value="${defaultProviderPercent}" ${isDisputed ? 'disabled' : ''} class="rounded-lg px-3 py-2 w-28 text-center font-600 text-cyan-300 ${isDisputed ? 'opacity-60' : ''}" />
                 <span class="text-xs text-slate-400 font-mono">% Share to Provider ${isAccepted ? `(capped at verified score: ${auditScore}%)` : ''}</span>
               </div>
-              <button id="btnFinalize" ${!isBuyerConnected ? 'disabled' : ''} class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 sm:ml-auto text-xs">
-                Calculate &amp; Lock Distribution
-              </button>
+              
+              <div class="flex items-center gap-2 sm:ml-auto">
+                 <button id="btnFinalize" ${!isBuyerConnected ? 'disabled' : ''} class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-xs">
+                   Calculate &amp; Lock
+                 </button>
+                 <button id="btnForceFinalize" class="btn border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs px-4 py-2.5 rounded-xl" title="Resolves abandoned cases if deadline passed">
+                   Force Finalize
+                 </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1827,6 +1933,10 @@ function bindTabEvents(){
 
   if(state.activeTab === "court"){
     byId("btnAdjudicate")?.addEventListener("click", requestAdjudication);
+    
+    // V2 Appeal Binding
+    byId("inpAppealTarget")?.addEventListener("input", e => { state.appealTarget = e.target.value; });
+    byId("inpAppealUrl")?.addEventListener("input", e => { state.appealUrl = e.target.value; });
     byId("inpAppealJustification")?.addEventListener("input", e => { state.appealJustification = e.target.value; });
     byId("btnAppeal")?.addEventListener("click", raiseAppeal);
 
@@ -1846,6 +1956,10 @@ function bindTabEvents(){
       const p = byId("inpPercent").value;
       finalizeSettlement(p);
     });
+    
+    // V2 Force Finalize Binding
+    byId("btnForceFinalize")?.addEventListener("click", forceFinalize);
+    
     byId("btnSettle")?.addEventListener("click", settleCase);
     byId("btnReset")?.addEventListener("click", resetCase);
   }
