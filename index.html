@@ -427,9 +427,7 @@ async function rpcCallWithRetry(fn, { retries = 4, baseDelay = 1500, label = "RP
   throw lastErr;
 }
 
-// Single source of truth for pulling case state + verdict + audit report off-chain.
-// Used by fetchOnChainHistory, requestAdjudication, and raiseAppeal so all three
-// paths behave identically instead of duplicating (and diverging on) this logic.
+// Single source of truth for pulling case state + verdict + audit report off-chain with object-safe requirements normalization.
 async function syncVerdictData(caseId) {
   const contractAddress = await getContractAddress();
   if (!contractAddress) return false;
@@ -457,7 +455,7 @@ async function syncVerdictData(caseId) {
   }
 
   const verdictStates = ["ACCEPTED", "DISPUTED", "FINALIZED", "SETTLED", "APPEALED"];
-  if (!verdictStates.includes(formattedState)) return true; // synced fine, no verdict yet
+  if (!verdictStates.includes(formattedState)) return true;
 
   const [verdictResult, auditRes] = await Promise.all([
     rpcCallWithRetry(() => client.readContract({ address: contractAddress, functionName: "get_adjudication_result", args: [caseId] }), { label: "get_adjudication_result" }).catch(() => ""),
@@ -470,6 +468,17 @@ async function syncVerdictData(caseId) {
 
   try {
     const parsedReport = JSON.parse(auditRes);
+    if (parsedReport) {
+      if (Array.isArray(parsedReport.passed_requirements)) {
+        parsedReport.passed_requirements = parsedReport.passed_requirements.map(p => typeof p === 'object' && p !== null ? p.id : p);
+      }
+      if (Array.isArray(parsedReport.failed_requirements)) {
+        parsedReport.failed_requirements = parsedReport.failed_requirements.map(f => {
+          if (typeof f === 'object' && f !== null) return f;
+          return { id: String(f), reason: "Requirement failed evaluation." };
+        });
+      }
+    }
     state.auditReport = parsedReport;
     if (parsedReport && parsedReport.total_score !== undefined) {
       state.overridePercent = Number(parsedReport.total_score);
@@ -1004,7 +1013,7 @@ async function submitDelivery(){
 }
 
 // ==========================================
-// DYNAMIC ADJUDICATION FUNCTION (retry-safe + shared verdict sync)
+// DYNAMIC ADJUDICATION FUNCTION (retry-safe + 10s polling + object-safe requirements)
 // ==========================================
 async function requestAdjudication(){
   const contractAddress = await getContractAddress();
@@ -1073,8 +1082,6 @@ async function requestAdjudication(){
     renderAll();
   } catch(err) {
     state.isAdjudicating = false;
-    // A "Failed to fetch" here does not necessarily mean the transaction failed —
-    // re-check on-chain truth before reverting the UI back to SUBMITTED.
     try { await syncVerdictData(state.caseId); } catch(e) {}
     if (!["ACCEPTED","DISPUTED","FINALIZED","SETTLED"].includes(state.caseState)) {
       state.caseState = "SUBMITTED";
