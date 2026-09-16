@@ -203,7 +203,7 @@
           <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
             <span class="font-mono text-xs text-slate-400">Connected Account</span>
             <span class="flex items-center gap-1.5 font-mono text-[11px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/25">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Studionet
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Studio Devnet
             </span>
           </div>
           <div class="mb-3">
@@ -345,17 +345,17 @@
 </div>
 
 <script type="module">
-import { createClient } from "genlayer-js";
-import { studionet } from "genlayer-js/chains";
+import { createClient, isSuccessful } from "genlayer-js";
+import { studioDevnet } from "genlayer-js/chains";
 
-const FIXED_REGISTRY_ADDRESS = "0x42Cf94434cBb800654cf9D4eb1048B48acfA0Ff8";
+const FIXED_REGISTRY_ADDRESS = "0xb2b284357039b4d71fCA3E9086E312dC497F8864";
 let cachedCourtAddress = "";
 const CACHE_PREFIX = "agentcourt_v2_";
 
 async function getContractAddress() {
   if (cachedCourtAddress) return cachedCourtAddress;
   try {
-    const client = createClient({ chain: studionet });
+    const client = createClient({ chain: studioDevnet });
     const activeAddress = await client.readContract({
       address: FIXED_REGISTRY_ADDRESS,
       functionName: "get_court_address",
@@ -377,7 +377,7 @@ async function getContractAddress() {
 function getClient() {
   const walletAddr = state.buyerAddress ? state.buyerAddress.trim() : undefined;
   return createClient({
-    chain: studionet,
+    chain: studioDevnet,
     account: walletAddr ? walletAddr : undefined,
   });
 }
@@ -982,14 +982,27 @@ async function createAndFundCase(){
     showLoadingOverlay("Creating & Funding Escrow", `Registering case "${escapeHtml(state.projectTitle)}" & locking ${fundAmountRaw} GEN...`);
     const client = getClient();
 
-    const txHash = await client.writeContract({
+    const writeReq = {
       address: contractAddress,
       functionName: "create_and_fund_case",
       args: [state.caseId, JSON.stringify(finalAgreement), state.providerAddress],
       value: amountWei,
+    };
+    
+    // Fee Estimation implementation
+    const estimate = await client.estimateTransactionFeesForWrite(writeReq);
+
+    const txHash = await client.writeContract({
+      ...writeReq,
+      fees: {
+        distribution: estimate.distribution,
+        feeValue: estimate.feeValue,
+      },
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    // Verify execution success
+    if (!isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
 
     state.caseCreated = true;
     state.caseState = "ACTIVE";
@@ -1043,13 +1056,26 @@ async function submitDelivery(){
     showLoadingOverlay("Submitting Delivery", "Generating Evidence Snapshot & Storing on-chain...");
     const client = getClient();
 
-    const txHash = await client.writeContract({
+    const writeReq = {
       address: contractAddress,
       functionName: "submit_delivery",
       args: [state.caseId, evidencePackage],
+    };
+    
+    // Fee Estimation implementation
+    const estimate = await client.estimateTransactionFeesForWrite(writeReq);
+
+    const txHash = await client.writeContract({
+      ...writeReq,
+      fees: {
+        distribution: estimate.distribution,
+        feeValue: estimate.feeValue,
+      },
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    // Verify execution success
+    if (!isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
 
     state.caseState = "SUBMITTED";
     saveCaseToHistory();
@@ -1078,9 +1104,19 @@ async function requestAdjudication(){
   try {
     const client = getClient();
     
-    // V2 Fix: `web_url` argument completely removed. Contract pulls recorded evidence securely.
+    const writeReq = { address: contractAddress, functionName: "request_adjudication", args: [state.caseId] };
+    
+    // Fee Estimation implementation
+    const estimate = await rpcCallWithRetry(
+      () => client.estimateTransactionFeesForWrite(writeReq),
+      { label: "estimate fees" }
+    );
+
     const txHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId] }),
+      () => client.writeContract({ 
+        ...writeReq, 
+        fees: { distribution: estimate.distribution, feeValue: estimate.feeValue } 
+      }),
       { label: "request_adjudication tx" }
     );
 
@@ -1088,10 +1124,12 @@ async function requestAdjudication(){
 
     let receiptOk = false;
     try {
-      await rpcCallWithRetry(
+      const receipt = await rpcCallWithRetry(
         () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 180000 }),
         { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(request_adjudication)" }
       );
+      // Verify execution success
+      if (receipt && !isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
       receiptOk = true;
     } catch (receiptErr) {
       console.warn("waitForTransactionReceipt failed, falling back to state polling:", receiptErr);
@@ -1162,28 +1200,46 @@ async function raiseAppeal() {
     showLoadingOverlay("Recording Appeal", "Submitting structured appeal justification on-chain...");
     const client = getClient();
 
+    const appealReq = { address: contractAddress, functionName: "raise_appeal", args: [state.caseId, structuredAppeal] };
+    const appealEst = await rpcCallWithRetry(() => client.estimateTransactionFeesForWrite(appealReq), { label: "appeal estimate" });
+
     const appealTxHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "raise_appeal", args: [state.caseId, structuredAppeal] }),
+      () => client.writeContract({ 
+        ...appealReq, 
+        fees: { distribution: appealEst.distribution, feeValue: appealEst.feeValue } 
+      }),
       { label: "raise_appeal tx" }
     );
-    await rpcCallWithRetry(
+    
+    const appealReceipt = await rpcCallWithRetry(
       () => client.waitForTransactionReceipt({ hash: appealTxHash, waitUntil: "finalized", timeout: 120000 }),
       { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(raise_appeal)" }
     );
+    // Verify execution success
+    if (appealReceipt && !isSuccessful(appealReceipt)) throw new Error(`Appeal execution failed: ${appealReceipt.statusName}`);
 
     state.caseState = "APPEALED";
     renderAll();
     showLoadingOverlay("Running Re-Audit", "Submitting decentralized re-adjudication...");
 
     // V2 Fix: request_adjudication takes only case_id
+    const reAuditReq = { address: contractAddress, functionName: "request_adjudication", args: [state.caseId] };
+    const reAuditEst = await rpcCallWithRetry(() => client.estimateTransactionFeesForWrite(reAuditReq), { label: "re-audit estimate" });
+
     const txHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "request_adjudication", args: [state.caseId] }),
+      () => client.writeContract({ 
+        ...reAuditReq, 
+        fees: { distribution: reAuditEst.distribution, feeValue: reAuditEst.feeValue } 
+      }),
       { label: "request_adjudication (appeal) tx" }
     );
-    await rpcCallWithRetry(
+    
+    const reAuditReceipt = await rpcCallWithRetry(
       () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 180000 }),
       { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(re-adjudication)" }
     );
+    // Verify execution success
+    if (reAuditReceipt && !isSuccessful(reAuditReceipt)) throw new Error(`Re-audit execution failed: ${reAuditReceipt.statusName}`);
 
     await syncVerdictData(state.caseId);
     state.appealJustification = "";
@@ -1212,13 +1268,26 @@ async function finalizeSettlement(percent){
     const client = getClient();
     const p = Math.max(0, Math.min(100, Number(percent)));
 
-    const txHash = await client.writeContract({
+    const writeReq = {
       address: contractAddress,
       functionName: "finalize_and_calculate_settlement",
       args: [state.caseId, BigInt(p)],
+    };
+    
+    // Fee Estimation implementation
+    const estimate = await client.estimateTransactionFeesForWrite(writeReq);
+
+    const txHash = await client.writeContract({
+      ...writeReq,
+      fees: {
+        distribution: estimate.distribution,
+        feeValue: estimate.feeValue,
+      },
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    // Verify execution success
+    if (!isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
 
     const payout = Math.floor((state.escrowBalance * p) / 100);
     state.settlementAmount = payout;
@@ -1243,15 +1312,23 @@ async function forceFinalize() {
     showLoadingOverlay("Force Finalizing", "Resolving abandoned case based on grace period...");
     const client = getClient();
 
+    const writeReq = { address: contractAddress, functionName: "force_finalize", args: [state.caseId] };
+    const estimate = await rpcCallWithRetry(() => client.estimateTransactionFeesForWrite(writeReq), { label: "force_finalize estimate" });
+
     const txHash = await rpcCallWithRetry(
-      () => client.writeContract({ address: contractAddress, functionName: "force_finalize", args: [state.caseId] }),
+      () => client.writeContract({ 
+        ...writeReq, 
+        fees: { distribution: estimate.distribution, feeValue: estimate.feeValue } 
+      }),
       { label: "force_finalize tx" }
     );
 
-    await rpcCallWithRetry(
+    const receipt = await rpcCallWithRetry(
       () => client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 }),
       { retries: 2, baseDelay: 3000, label: "waitForTransactionReceipt(force_finalize)" }
     );
+    // Verify execution success
+    if (receipt && !isSuccessful(receipt)) throw new Error(`Force finalize execution failed: ${receipt.statusName}`);
 
     await syncVerdictData(state.caseId);
     hideLoadingOverlay();
@@ -1271,13 +1348,26 @@ async function settleCase(){
     showLoadingOverlay("Releasing Escrow", "Transferring tokens on-chain...");
     const client = getClient();
 
-    const txHash = await client.writeContract({
+    const writeReq = {
       address: contractAddress,
       functionName: "settle_case",
       args: [state.caseId],
+    };
+    
+    // Fee Estimation implementation
+    const estimate = await client.estimateTransactionFeesForWrite(writeReq);
+
+    const txHash = await client.writeContract({
+      ...writeReq,
+      fees: {
+        distribution: estimate.distribution,
+        feeValue: estimate.feeValue,
+      },
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    // Verify execution success
+    if (!isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
 
     state.caseState = "SETTLED";
     saveCaseToHistory();
@@ -1298,13 +1388,26 @@ async function claimRefund(){
     showLoadingOverlay("Claiming Refund", "Requesting deadline-based refund on-chain...");
     const client = getClient();
 
-    const txHash = await client.writeContract({
+    const writeReq = {
       address: contractAddress,
       functionName: "claim_refund_after_deadline",
       args: [state.caseId],
+    };
+    
+    // Fee Estimation implementation
+    const estimate = await client.estimateTransactionFeesForWrite(writeReq);
+
+    const txHash = await client.writeContract({
+      ...writeReq,
+      fees: {
+        distribution: estimate.distribution,
+        feeValue: estimate.feeValue,
+      },
     });
 
-    await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash, waitUntil: "finalized", timeout: 120000 });
+    // Verify execution success
+    if (!isSuccessful(receipt)) throw new Error(`Execution failed: ${receipt.statusName} / ${receipt.txExecutionResultName || 'Error'}`);
 
     state.caseState = "SETTLED";
     state.settlementAmount = 0;
