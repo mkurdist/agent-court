@@ -145,7 +145,7 @@
 
 <div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3 pointer-events-none"></div>
 
-<div id="globalOverlay" class="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex flex-col items-center justify-center hidden opacity-0 transition-opacity duration-300">
+<div id="globalOverlay" class="fixed inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center hidden opacity-0 transition-opacity duration-300">
   <div class="glass p-6 rounded-2xl border border-cyan-500/30 glow-cyan flex flex-col items-center space-y-4 max-w-sm text-center">
     <div class="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
     <div class="font-display font-600 text-sm text-cyan-200" id="overlayTitle">Processing On-Chain Action</div>
@@ -1653,7 +1653,7 @@ function renderBuyerTab(){
               <label class="flex items-center justify-between px-3 py-2.5 text-sm hover:bg-slate-800/40 cursor-pointer transition-colors">
                 <div class="flex items-center gap-2.5">
                   <input type="checkbox" data-req-id="${escapeHtml(r.id)}" ${checked ? 'checked' : ''} ${disabledCreate?'disabled':''} class="checkbox-req w-4 h-4 rounded" />
-                  <span class="text-slate-300 text-xs"><strong class="text-cyan-400 font-mono mr-1">${escapeHtml(r.id)}:</strong> ${escapeHtml(r.description)}</span>
+                  <span class="text-slate-300 text-xs"><strong class="text-cyan-400 font-mono mr-1">${escapeHtml(r.id)}:</strong>${escapeHtml(r.description)}</span>
                 </div>
                 <span class="font-mono text-[11px] text-amber-300 shrink-0 ml-2">${r.weight}%</span>
               </label>
@@ -1945,7 +1945,7 @@ function renderHistoryTab() {
                 <span class="text-amber-200 text-xs font-bold">(${escapeHtml(c.title || 'Project')})</span>
                 <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(c.state)}</span>
               </div>
-              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> | Provider: ${c.provider ? escapeHtml(c.provider.slice(0,6)+'...'+c.provider.slice(-4)) : '—'}</div>
+              <div class="font-mono text-xs text-slate-400">Escrow: <span class="text-amber-300">${c.escrow} GEN</span> \vert{} Provider:${c.provider ? escapeHtml(c.provider.slice(0,6)+'...'+c.provider.slice(-4)) : '—'}</div>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-[11px] font-mono text-slate-500">[${escapeHtml(c.time)}]</span>
