@@ -139,6 +139,9 @@
   .state-line{transition:all .5s ease;}
 
   .checkbox-req{accent-color:#22d3ee;}
+  .timer-box { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.2); }
+  .timer-active { color: #34d399; box-shadow: 0 0 10px rgba(52, 211, 153, 0.2); border-color: #34d399; }
+  .timer-expired { color: #f87171; box-shadow: 0 0 10px rgba(248, 113, 113, 0.2); border-color: #f87171; animation: pulseDot 2s infinite; }
 </style>
 </head>
 <body class="antialiased">
@@ -279,6 +282,18 @@
     </div>
 
     <div class="space-y-6">
+      <!-- TIMER WIDGET -->
+      <div class="glass rounded-2xl p-5 glow-amber relative overflow-hidden mb-6">
+        <h3 class="font-display text-sm font-600 text-slate-200 mb-3 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span> Smart Contract Deadline
+        </h3>
+        <div class="text-center mb-3">
+          <span id="countdownTimer" class="timer-box timer-active">00d 00h 00m 00s</span>
+        </div>
+        <div id="timerStatusMsg" class="text-[10px] font-mono text-center text-slate-400">
+          Waiting for case activation...
+        </div>
+      </div>
       <div class="glass rounded-2xl p-5 glow-violet">
         <div class="flex items-center justify-between mb-3">
           <h3 class="font-display text-sm font-600 text-slate-200">Live Verdict Scale</h3>
@@ -351,6 +366,7 @@ import { studioDevnet } from "genlayer-js/chains";
 const FIXED_REGISTRY_ADDRESS = "0xb2b284357039b4d71fCA3E9086E312dC497F8864";
 let cachedCourtAddress = "";
 const CACHE_PREFIX = "agentcourt_v2_";
+let countdownInterval = null;
 
 async function getContractAddress() {
   if (cachedCourtAddress) return cachedCourtAddress;
@@ -620,7 +636,8 @@ let state = {
   caseHistory: [],
   log: [],
   selectedReqs: DEFAULT_AGREEMENT.requirements.map(r => r.id),
-  customReqs: []
+  customReqs: [],
+  deadlineTimestamp: 0
 };
 
 window.state = state;
@@ -743,6 +760,7 @@ async function fetchOnChainHistory() {
       try {
         const parsed = JSON.parse(caseJsonStr);
         if (parsed.project_title) state.projectTitle = parsed.project_title;
+        if (parsed.deadline) state.deadlineTimestamp = parsed.deadline;
         if (Array.isArray(parsed.requirements) && parsed.requirements.length > 0) {
           state.agreement = parsed;
         }
@@ -750,6 +768,7 @@ async function fetchOnChainHistory() {
     }
 
     await syncVerdictData(state.caseId);
+    startTimer();
   } catch (err) {
     console.warn("Failed to fetch on-chain history:", err);
   }
@@ -838,6 +857,46 @@ function updateWorkflowStepper() {
     step4.querySelector("span").className = "w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold text-[10px]";
     if(hintBadge) hintBadge.textContent = "Step 4: Request AI Adjudication & Settle Case";
   }
+}
+
+function updateTimerUI() {
+    const timerEl = document.getElementById("countdownTimer");
+    const statusEl = document.getElementById("timerStatusMsg");
+    if (!timerEl || !statusEl) return;
+
+    if (!state.caseCreated || !state.deadlineTimestamp) {
+        timerEl.textContent = "00d 00h 00m 00s";
+        timerEl.className = "timer-box";
+        statusEl.textContent = "Waiting for case activation...";
+        return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const diff = state.deadlineTimestamp - now;
+
+    if (diff <= 0) {
+        timerEl.textContent = "00d 00h 00m 00s";
+        timerEl.className = "timer-box timer-expired";
+        const graceEnd = state.deadlineTimestamp + 86400; // 24h grace period
+        statusEl.innerHTML = now >= graceEnd 
+            ? `<span class="text-red-400 font-bold">Grace period ended! Force Finalize active.</span>`
+            : `<span class="text-amber-400">Deadline passed. 24h Grace period active.</span>`;
+        return;
+    }
+
+    const d = Math.floor(diff / 86400);
+    const h = Math.floor((diff % 86400) / 3600);
+    const m = Math.floor((diff % 3600) / 60);
+    const s = diff % 60;
+    timerEl.textContent = `${d}d ${h.toString().padStart(2,'0')}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`;
+    timerEl.className = "timer-box timer-active";
+    statusEl.textContent = "Escrow is locked and tracking time...";
+}
+
+function startTimer() {
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = setInterval(updateTimerUI, 1000);
+    updateTimerUI();
 }
 
 async function connectWallet() {
@@ -969,10 +1028,14 @@ async function createAndFundCase(){
     activeReqs.forEach(r => r.weight = Math.round((r.weight / totalWeight) * 100));
   }
 
+  const daysToAdd = parseInt(document.getElementById("inpDeadlineDays")?.value || "7");
+  const computedDeadline = Math.floor(Date.now() / 1000) + (daysToAdd * 86400);
+
   const finalAgreement = {
     ...DEFAULT_AGREEMENT,
     case_id: state.caseId,
     project_title: state.projectTitle || "Untitled Project",
+    deadline: computedDeadline,
     expected_claims: dynamicClaims, // Replaces fixed claims
     requirements: activeReqs
   };
@@ -1007,7 +1070,9 @@ async function createAndFundCase(){
     state.caseCreated = true;
     state.caseState = "ACTIVE";
     state.escrowBalance = Number(fundAmountRaw);
+    state.deadlineTimestamp = computedDeadline;
     saveCaseToHistory();
+    startTimer();
     hideLoadingOverlay();
     showToast("Case created and funded successfully!");
 
@@ -1640,6 +1705,18 @@ function renderBuyerTab(){
         </div>
       </div>
 
+      <!-- NEW TIMER DEADLINE INPUT -->
+      <div class="p-4 rounded-xl bg-slate-900/50 border border-slate-700/60 flex items-center justify-between ${disabledCreate?'opacity-60':''}">
+         <div>
+            <label class="text-sm text-cyan-300 font-mono font-bold block mb-1">Smart Contract Deadline</label>
+            <span class="text-xs text-slate-400">Time allowed for the provider to submit evidence.</span>
+         </div>
+         <div class="flex items-center gap-2">
+            <input id="inpDeadlineDays" type="number" min="1" max="90" value="7" ${disabledCreate?'disabled':''} class="w-20 rounded-lg px-3 py-2 text-center font-mono" />
+            <span class="text-sm text-slate-300">Days</span>
+         </div>
+      </div>
+
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <label class="text-xs text-cyan-300 font-mono uppercase tracking-wider block">Select Standards &amp; Custom Rules to Enforce</label>
@@ -1778,6 +1855,10 @@ function renderCourtTab(){
   const passedReqs = state.auditReport && state.auditReport.passed_requirements ? state.auditReport.passed_requirements : [];
   const failedReqsObj = state.auditReport && state.auditReport.failed_requirements ? state.auditReport.failed_requirements : [];
 
+  // TIMER LOGIC FOR BUTTONS
+  const now = Math.floor(Date.now() / 1000);
+  const isGracePassed = state.deadlineTimestamp > 0 && now >= (state.deadlineTimestamp + 86400);
+
   return `
     <div class="glass rounded-2xl p-6 space-y-6 fade-up">
       <div class="flex items-center justify-between flex-wrap gap-3">
@@ -1895,7 +1976,7 @@ function renderCourtTab(){
                  <button id="btnFinalize" ${!isBuyerConnected ? 'disabled' : ''} class="btn glow-green px-6 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-xs">
                    Calculate &amp; Lock
                  </button>
-                 <button id="btnForceFinalize" class="btn border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs px-4 py-2.5 rounded-xl" title="Resolves abandoned cases if deadline passed">
+                 <button id="btnForceFinalize" ${!isGracePassed ? 'disabled' : ''} class="btn ${isGracePassed ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 glow-amber' : 'border border-red-500/40 bg-red-500/10 text-red-300 opacity-50'} text-xs px-4 py-2.5 rounded-xl" title="Resolves abandoned cases if deadline passed">
                    Force Finalize
                  </button>
               </div>
